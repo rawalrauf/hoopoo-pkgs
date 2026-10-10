@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       packages:
-        description: 'Space-separated list of packages to build (leave empty for all changed)'
+        description: 'Space-separated list of packages to build (empty = all)'
         required: false
 
 jobs:
@@ -16,17 +16,24 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux/archlinux:latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Setup build environment
         run: |
-          pacman -Sy --noconfirm base-devel git go
+          pacman -Sy --noconfirm base-devel git go pacman
 
           # Create non-root build user (makepkg refuses to run as root)
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+          # Allow builder to write to workspace
+          chown -R builder "$GITHUB_WORKSPACE"
 
       - name: Determine packages to build
         id: packages
@@ -34,8 +41,12 @@ jobs:
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
             echo "pkgs=${{ github.event.inputs.packages }}" >> $GITHUB_OUTPUT
           else
-            changed=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | \
+            changed=$(git diff --name-only HEAD~1 HEAD | \
               grep '^pkgbuilds/' | cut -d/ -f2 | sort -u | tr '\n' ' ')
+            if [[ -z $changed ]]; then
+              # fallback: build all on manual dispatch with no input
+              changed=$(ls pkgbuilds/ | tr '\n' ' ')
+            fi
             echo "pkgs=$changed" >> $GITHUB_OUTPUT
           fi
 
@@ -44,20 +55,43 @@ jobs:
           mkdir -p output
           for pkg in ${{ steps.packages.outputs.pkgs }}; do
             [[ -d pkgbuilds/$pkg ]] || continue
-            echo "Building $pkg..."
+            echo "=== Building $pkg ==="
             cp -r pkgbuilds/$pkg /tmp/build-$pkg
             chown -R builder /tmp/build-$pkg
             cd /tmp/build-$pkg
-            sudo -u builder makepkg -s --noconfirm --noprogressbar 2>&1
+            sudo -u builder makepkg -s --noconfirm --noprogressbar --needed 2>&1 || {
+              echo "FAILED: $pkg" ; cd $GITHUB_WORKSPACE ; continue
+            }
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/output/ 2>/dev/null || true
             cd $GITHUB_WORKSPACE
           done
+          ls output/
+
+      - name: Download existing release assets
+        run: |
+          mkdir -p output
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | \
+            python3 -c "
+import sys, json, urllib.request, os
+data = json.load(sys.stdin)
+for a in data.get('assets', []):
+    name = a['name']
+    if name.endswith('.pkg.tar.zst') or name in ('hoopoo.db', 'hoopoo.db.tar.gz', 'hoopoo.files', 'hoopoo.files.tar.gz'):
+        if not os.path.exists(f'output/{name}'):
+            print(f'Downloading {name}')
+            urllib.request.urlretrieve(a['browser_download_url'], f'output/{name}')
+" 2>/dev/null || true
 
       - name: Generate pacman repo database
         run: |
           cd output
-          repo-add hoopoo.db.tar.gz *.pkg.tar.zst 2>/dev/null || true
-          ls -la
+          shopt -s nullglob
+          pkgs=(*.pkg.tar.zst)
+          if (( ${#pkgs[@]} > 0 )); then
+            repo-add hoopoo.db.tar.gz "${pkgs[@]}"
+          fi
+          ls -lh
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
