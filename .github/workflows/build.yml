@@ -108,6 +108,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          make_latest: false
           files: output/*
           fail_on_unmatched_files: false
         env:
