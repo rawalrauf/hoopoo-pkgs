@@ -71,17 +71,16 @@ jobs:
         run: |
           mkdir -p output
           curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | \
-            python3 -c "
-import sys, json, urllib.request, os
-data = json.load(sys.stdin)
-for a in data.get('assets', []):
-    name = a['name']
-    if name.endswith('.pkg.tar.zst') or name in ('hoopoo.db', 'hoopoo.db.tar.gz', 'hoopoo.files', 'hoopoo.files.tar.gz'):
-        if not os.path.exists(f'output/{name}'):
-            print(f'Downloading {name}')
-            urllib.request.urlretrieve(a['browser_download_url'], f'output/{name}')
-" 2>/dev/null || true
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/release.json 2>/dev/null || true
+          if [[ -f /tmp/release.json ]]; then
+            grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | while read url; do
+              name=$(basename "$url")
+              if [[ $name == *.pkg.tar.zst || $name == hoopoo.db* || $name == hoopoo.files* ]]; then
+                [[ -f output/$name ]] || curl -sL "$url" -o "output/$name"
+              fi
+            done
+          fi
 
       - name: Generate pacman repo database
         run: |
