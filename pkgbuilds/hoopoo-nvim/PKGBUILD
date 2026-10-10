@@ -1,5 +1,5 @@
 # Maintainer: Ryan Hughes <ryan@omarchy.org>
-pkgname=omarchy-nvim
+pkgname=hoopoo-nvim
 pkgver=2026.9.21
 pkgrel=3
 pkgdesc="Pre-built LazyVim configuration with cached plugins"
@@ -8,7 +8,8 @@ url="https://github.com/LazyVim/LazyVim"
 license=('MIT')
 depends=('neovim>=0.9.0' 'git')
 makedepends=('git' 'nodejs' 'npm' 'tree-sitter-cli')
-conflicts=('omarchy-lazyvim')
+conflicts=('omarchy-lazyvim' 'omarchy-nvim')
+provides=('omarchy-nvim')
 options=('!debug')
 source=("https://github.com/LazyVim/starter/archive/refs/heads/main.tar.gz")
 sha256sums=('d865d50211358358d3c3c1e356773c1e3de1e8964215d85eb1b4c77521e17488')
