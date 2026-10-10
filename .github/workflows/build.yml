@@ -2,7 +2,7 @@ name: Publish
 
 on:
   push:
-    branches: [main, edge]
+    branches: [stable, edge]
     paths:
       - 'pkgbuilds/**'
   workflow_dispatch:
@@ -95,7 +95,7 @@ jobs:
       - name: Determine release tag
         id: tag
         run: |
-          if [[ "${{ github.ref_name }}" == "master" ]]; then
+          if [[ "${{ github.ref_name }}" == "stable" ]]; then
             echo "name=stable" >> $GITHUB_OUTPUT
           else
             echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
