@@ -143,6 +143,5 @@ package() {
   # refresh explicitly backs up and overwrites with the same /etc/skel defaults
   # used for newly-created users.
   install -Dm755 "$startdir/hoopoo-nvim-setup" "$pkgdir/usr/bin/hoopoo-nvim-setup"
-  ln -s hoopoo-nvim-setup "$pkgdir/usr/bin/hoopoo-nvim-setup"
   ln -s hoopoo-nvim-setup "$pkgdir/usr/bin/omarchy-nvim-refresh"
 }
