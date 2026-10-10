@@ -26,7 +26,7 @@ jobs:
 
       - name: Setup build environment
         run: |
-          pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python
+          pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg
 
           # Create non-root build user (makepkg refuses to run as root)
           useradd -m builder
@@ -34,6 +34,9 @@ jobs:
 
           # Allow builder to write to workspace
           chown -R builder "$GITHUB_WORKSPACE"
+
+          # Import Spotify GPG key for signature verification
+          sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 5384CE82BA52C83A || true
 
       - name: Determine packages to build
         id: packages
