@@ -1,0 +1,56 @@
+name: Sync Upstream Versions
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check and update package versions
+        run: |
+          git config user.name "hoopoo-bot"
+          git config user.email "bot@hoopoo"
+
+          updated=false
+
+          for dir in pkgbuilds/*/; do
+            pkg=$(basename "$dir")
+            pkgjson="$dir/.hoopoo/package.json"
+            pkgbuild="$dir/PKGBUILD"
+
+            [[ -f $pkgjson && -f $pkgbuild ]] || continue
+
+            # Read github upstream watch
+            repo=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(d.get('upstream',{}).get('watch',{}).get('github',''))" 2>/dev/null)
+            [[ -z $repo ]] && continue
+
+            # Get latest release tag
+            latest=$(curl -s "https://api.github.com/repos/$repo/releases/latest" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | \
+              python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name','').lstrip('v'))" 2>/dev/null)
+            [[ -z $latest ]] && continue
+
+            current=$(grep "^pkgver=" "$pkgbuild" | cut -d= -f2)
+
+            if [[ "$latest" != "$current" ]]; then
+              echo "Updating $pkg: $current -> $latest"
+              sed -i "s/^pkgver=.*/pkgver=$latest/" "$pkgbuild"
+              sed -i "s/^pkgrel=.*/pkgrel=1/" "$pkgbuild"
+              updated=true
+            fi
+          done
+
+          if [[ $updated == true ]]; then
+            git add pkgbuilds/
+            git commit -m "chore: sync upstream package versions"
+            git push
+          else
+            echo "All packages up to date"
+          fi
