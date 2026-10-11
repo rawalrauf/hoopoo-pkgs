@@ -117,13 +117,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          name: ${{ steps.tag.outputs.name }}
-          make_latest: false
-          files: output/*
-          fail_on_unmatched_files: false
-          clobber: true
+        run: |
+          gh release upload "${{ steps.tag.outputs.name }}" \
+            output/*.pkg.tar.zst output/hoopoo.db.tar.gz output/hoopoo.db \
+            output/hoopoo.files.tar.gz output/hoopoo.files \
+            --repo "${{ github.repository }}" \
+            --clobber 2>/dev/null || \
+          gh release upload "${{ steps.tag.outputs.name }}" \
+            output/*.pkg.tar.zst output/hoopoo.db.tar.gz \
+            --repo "${{ github.repository }}" \
+            --clobber
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
