@@ -44,10 +44,9 @@ jobs:
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
             echo "pkgs=${{ github.event.inputs.packages }}" >> $GITHUB_OUTPUT
           else
-            changed=$(git diff --name-only HEAD~1 HEAD | \
+            changed=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | \
               grep '^pkgbuilds/' | cut -d/ -f2 | sort -u | tr '\n' ' ')
             if [[ -z $changed ]]; then
-              # fallback: build all on manual dispatch with no input
               changed=$(ls pkgbuilds/ | tr '\n' ' ')
             fi
             echo "pkgs=$changed" >> $GITHUB_OUTPUT
