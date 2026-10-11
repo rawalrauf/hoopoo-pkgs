@@ -104,6 +104,16 @@ jobs:
             echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Ensure release exists
+        run: |
+          gh release view "${{ steps.tag.outputs.name }}" > /dev/null 2>&1 || \
+          gh release create "${{ steps.tag.outputs.name }}" \
+            --title "${{ steps.tag.outputs.name }}" \
+            --notes "Automated release" \
+            --latest=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
