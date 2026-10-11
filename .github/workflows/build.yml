@@ -112,5 +112,6 @@ jobs:
           make_latest: false
           files: output/*
           fail_on_unmatched_files: false
+          clobber: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
