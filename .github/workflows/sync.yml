@@ -20,8 +20,6 @@ jobs:
 
       - name: Check and update package versions
         run: |
-          set -euo pipefail
-
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
 
@@ -34,15 +32,16 @@ jobs:
 
             [[ -f $pkgjson && -f $pkgbuild ]] || continue
 
-            repo=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(d.get('upstream',{}).get('watch',{}).get('github',''))" 2>/dev/null)
+            repo=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(d.get('upstream',{}).get('watch',{}).get('github',''))" 2>/dev/null || echo "")
             [[ -z $repo ]] && continue
 
             latest=$(curl -s "https://api.github.com/repos/$repo/releases/latest" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | \
-              python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name','').lstrip('v'))" 2>/dev/null)
+              python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tag_name','').lstrip('v'))" 2>/dev/null || echo "")
             [[ -z $latest ]] && continue
 
-            current=$(grep "^pkgver=" "$pkgbuild" | cut -d= -f2)
+            current=$(grep "^pkgver=" "$pkgbuild" | cut -d= -f2 || echo "")
+            [[ -z $current ]] && continue
 
             if [[ "$latest" != "$current" ]]; then
               echo "Updating $pkg: $current -> $latest"
