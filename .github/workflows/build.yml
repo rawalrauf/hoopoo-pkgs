@@ -26,7 +26,7 @@ jobs:
 
       - name: Setup build environment
         run: |
-          pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg
+          pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           # Create non-root build user (makepkg refuses to run as root)
           useradd -m builder
