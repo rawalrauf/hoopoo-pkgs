@@ -69,10 +69,20 @@ jobs:
           done
           ls output/
 
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [[ "${{ github.ref_name }}" == "stable" ]]; then
+            echo "name=stable" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Download existing release assets
         run: |
           mkdir -p output
-          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" \
+          TAG="${{ steps.tag.outputs.name }}"
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
           if [[ -f /tmp/release.json ]]; then
@@ -94,19 +104,12 @@ jobs:
           fi
           ls -lh
 
-      - name: Determine release tag
-        id: tag
-        run: |
-          if [[ "${{ github.ref_name }}" == "stable" ]]; then
-            echo "name=stable" >> $GITHUB_OUTPUT
-          else
-            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Ensure release exists
         run: |
-          gh release view "${{ steps.tag.outputs.name }}" > /dev/null 2>&1 || \
+          gh release view "${{ steps.tag.outputs.name }}" \
+            --repo "${{ github.repository }}" > /dev/null 2>&1 || \
           gh release create "${{ steps.tag.outputs.name }}" \
+            --repo "${{ github.repository }}" \
             --title "${{ steps.tag.outputs.name }}" \
             --notes "Automated release" \
             --latest=false
