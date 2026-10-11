@@ -7,9 +7,7 @@
 
 pkgname=spotify
 pkgver='1.2.96.518'
-epoch=1
-_commit=g366879e1
-pkgrel=2
+pkgrel=3
 pkgdesc='A proprietary music streaming service'
 arch=('x86_64')
 license=('custom')
