@@ -11,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: edge
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check and update package versions
@@ -50,7 +51,7 @@ jobs:
           if [[ $updated == true ]]; then
             git add pkgbuilds/
             git commit -m "chore: sync upstream package versions"
-            git push
+            git push origin edge
           else
             echo "All packages up to date"
           fi
