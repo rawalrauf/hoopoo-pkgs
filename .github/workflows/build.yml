@@ -67,7 +67,12 @@ jobs:
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/output/ 2>/dev/null || true
             cd $GITHUB_WORKSPACE
           done
-          ls output/
+
+          if ! ls output/*.pkg.tar.zst 1> /dev/null 2>&1; then
+            echo "ERROR: No packages built successfully"
+            exit 1
+          fi
+          ls -lh output/
 
       - name: Determine release tag
         id: tag
@@ -76,22 +81,6 @@ jobs:
             echo "name=stable" >> $GITHUB_OUTPUT
           else
             echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Download existing release assets
-        run: |
-          mkdir -p output
-          TAG="${{ steps.tag.outputs.name }}"
-          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -o /tmp/release.json 2>/dev/null || true
-          if [[ -f /tmp/release.json ]]; then
-            grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | while read url; do
-              name=$(basename "$url")
-              if [[ $name == *.pkg.tar.zst || $name == hoopoo.db* || $name == hoopoo.files* ]]; then
-                [[ -f output/$name ]] || curl -sL "$url" -o "output/$name"
-              fi
-            done
           fi
 
       - name: Generate pacman repo database
@@ -128,13 +117,15 @@ jobs:
                 --repo "${{ github.repository }}" --yes 2>/dev/null || true
             done
 
-          # Upload all new files
-          gh release upload "$TAG" \
-            output/*.pkg.tar.zst output/hoopoo.db.tar.gz output/hoopoo.db \
-            output/hoopoo.files.tar.gz output/hoopoo.files \
-            --repo "${{ github.repository }}" 2>/dev/null || \
-          gh release upload "$TAG" \
-            output/*.pkg.tar.zst output/hoopoo.db.tar.gz \
+          # Upload files that exist
+          cd output
+          files_to_upload="*.pkg.tar.zst"
+          [[ -f hoopoo.db.tar.gz ]] && files_to_upload+=" hoopoo.db.tar.gz"
+          [[ -f hoopoo.db ]] && files_to_upload+=" hoopoo.db"
+          [[ -f hoopoo.files.tar.gz ]] && files_to_upload+=" hoopoo.files.tar.gz"
+          [[ -f hoopoo.files ]] && files_to_upload+=" hoopoo.files"
+
+          gh release upload "$TAG" $files_to_upload \
             --repo "${{ github.repository }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
