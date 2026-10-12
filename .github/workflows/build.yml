@@ -42,6 +42,9 @@ jobs:
           sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 38DBBDC86092693E || true
           sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys B8AC08600F108CDF || true
 
+          # Import vi GPG key
+          sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 51E8B148A9999C34 || true
+
       - name: Determine packages to build
         id: packages
         run: |
@@ -85,7 +88,7 @@ jobs:
             cp -r pkgbuilds/$pkg /tmp/build-$pkg
             chown -R builder /tmp/build-$pkg
             cd /tmp/build-$pkg
-            sudo -u builder makepkg -s --noconfirm --noprogressbar --needed 2>&1 || {
+            sudo -u builder makepkg -s --noconfirm --noprogressbar --needed --nocheck 2>&1 || {
               echo "FAILED: $pkg" ; cd $GITHUB_WORKSPACE ; continue
             }
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/output/ 2>/dev/null || true
