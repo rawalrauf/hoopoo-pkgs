@@ -15,6 +15,38 @@ Server = https://github.com/rawalrauf/hoopoo-pkgs/releases/download/stable
 - `stable` — tested, used for installs
 - `edge` — auto-syncs upstream every 6h, built automatically on push
 
+## Adding a package
+
+Create `pkgbuilds/<pkgname>/PKGBUILD` and optionally `pkgbuilds/<pkgname>/.hoopoo/package.json`.
+
+### .hoopoo/package.json fields
+
+```json
+{
+  "source": "local",
+
+  "gpg_keys": ["KEY_ID_1", "KEY_ID_2"],
+
+  "nocheck": "true",
+
+  "hoopoo_deps": ["other-hoopoo-package"],
+
+  "upstream": {
+    "watch": {
+      "github": "owner/repo",
+      "pattern": "v?(?P<version>[0-9]+(?:\\.[0-9]+)*)"
+    }
+  }
+}
+```
+
+- `gpg_keys` — GPG key IDs to import before building (for signature verification)
+- `nocheck` — set to `"true"` to skip the `check()` function (use when checkdepends are unavailable)
+- `hoopoo_deps` — other packages from this repo needed at build time as dependencies
+- `upstream.watch` — enables auto-sync; use `\\` to escape backslashes in regex patterns
+
+**Important:** In JSON strings, backslashes must be doubled. So `\.` becomes `\\.` and `\(` becomes `\\(`.
+
 ## Packages
 
 | Package | Source | Description |
