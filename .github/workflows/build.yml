@@ -68,9 +68,10 @@ jobs:
               name=$(basename "$url")
               curl -sL "$url" -o "/tmp/hoopoo-deps/$name"
             done
-            if ls /tmp/hoopoo-deps/*.pkg.tar.zst &>/dev/null; then
-              pacman -U --noconfirm /tmp/hoopoo-deps/*.pkg.tar.zst || true
-            fi
+            # Install packages one by one so a single failure doesn't block others
+            for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
+              pacman -U --noconfirm "$pkg" 2>/dev/null || true
+            done
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
