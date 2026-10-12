@@ -43,7 +43,7 @@ jobs:
             exit 1
           }
 
-          useradd -m builder || echo "user already exists"
+          useradd -m builder 2>/dev/null || true
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R builder "$GITHUB_WORKSPACE"
 
