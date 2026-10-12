@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux/archlinux:latest
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: write
 
@@ -27,7 +30,8 @@ jobs:
       - name: Setup build environment
         run: |
           sed -i '/^\[multilib\]/,/^$/{/^#/s/^#//}' /etc/pacman.conf
-          pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
+          pacman -Sy --noconfirm
+          pacman -S --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
