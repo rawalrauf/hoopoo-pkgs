@@ -26,6 +26,8 @@ jobs:
 
       - name: Setup build environment
         run: |
+          # Enable multilib repo for lib32 packages
+          sed -i '/^#\[multilib\]/{s/^#//;n;s/^#//}' /etc/pacman.conf
           pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           # Create non-root build user (makepkg refuses to run as root)
