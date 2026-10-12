@@ -1,1 +1,5 @@
-{"source":"local","nocheck":"true"}
+{
+  "source": "local",
+  "nocheck": "true",
+  "hoopoo_deps": ["v4l2-relayd"]
+}

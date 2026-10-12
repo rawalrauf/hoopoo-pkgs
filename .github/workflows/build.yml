@@ -67,15 +67,31 @@ for k in d.get('gpg_keys', []):
           curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
-          if [[ -f /tmp/release.json ]]; then
+
+          # Collect hoopoo_deps declared in .hoopoo/package.json for packages being built
+          needed_deps=""
+          for pkg in ${{ steps.packages.outputs.pkgs }}; do
+            pkgjson="pkgbuilds/$pkg/.hoopoo/package.json"
+            [[ -f $pkgjson ]] || continue
+            deps=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(' '.join(d.get('hoopoo_deps',[])))" 2>/dev/null)
+            needed_deps="$needed_deps $deps"
+          done
+
+          if [[ -n $needed_deps && -f /tmp/release.json ]]; then
             mkdir -p /tmp/hoopoo-deps
-            grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | grep '\.pkg\.tar\.zst$' | grep -v 'debug' | while read url; do
-              name=$(basename "$url")
-              curl -sL "$url" -o "/tmp/hoopoo-deps/$name"
+            for dep in $needed_deps; do
+              url=$(python3 -c "
+import json, re
+d = json.load(open('/tmp/release.json'))
+for a in d.get('assets', []):
+    if re.match(r'^${dep}-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$', a['name']) and 'debug' not in a['name']:
+        print(a['browser_download_url'])
+        break
+" 2>/dev/null)
+              [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst"
             done
-            # Install packages one by one so a single failure doesn't block others
             for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
-              pacman -U --noconfirm "$pkg" 2>/dev/null || true
+              [[ -f $pkg ]] && pacman -U --noconfirm "$pkg" 2>/dev/null || true
             done
           fi
         env:
