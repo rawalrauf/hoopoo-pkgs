@@ -64,30 +64,37 @@ jobs:
 
       - name: Install hoopoo packages as dependencies
         run: |
-          if [[ "${{ github.ref_name }}" == "stable" ]]; then TAG="stable"; else TAG="${{ github.ref_name }}"; fi
+          TAG="${{ github.ref_name }}"
+          [[ "$TAG" == "stable" ]] || TAG="stable"
+          echo "Fetching release: $TAG"
           curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
+          echo "Release JSON size: $(wc -c < /tmp/release.json 2>/dev/null || echo 0) bytes"
 
-          # Collect hoopoo_deps for packages being built
           needed_deps=""
           for pkg in ${{ steps.packages.outputs.pkgs }}; do
             pkgjson="pkgbuilds/$pkg/.hoopoo/package.json"
             [[ -f $pkgjson ]] || continue
             deps=$(python3 -c "import json,sys; print(' '.join(json.load(open(sys.argv[1])).get('hoopoo_deps',[])))" "$pkgjson" 2>/dev/null)
-            needed_deps="$needed_deps $deps"
+            [[ -n $deps ]] && needed_deps="$needed_deps $deps" && echo "  $pkg needs: $deps"
           done
+          echo "All deps needed: $needed_deps"
 
-          if [[ -n $needed_deps && -f /tmp/release.json ]]; then
+          if [[ -n ${needed_deps// /} && -f /tmp/release.json ]]; then
             mkdir -p /tmp/hoopoo-deps
             for dep in $needed_deps; do
-              echo "Installing hoopoo dep: $dep"
+              [[ -z $dep ]] && continue
+              echo "Fetching: $dep"
               url=$(python3 bin/find-dep-url.py /tmp/release.json "$dep" 2>/dev/null)
+              echo "URL: $url"
               [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst" && echo "Downloaded $dep"
             done
             for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
               [[ -f $pkg ]] && pacman -U --noconfirm "$pkg" 2>/dev/null || true
             done
+          else
+            echo "No hoopoo deps needed"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
