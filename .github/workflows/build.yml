@@ -29,36 +29,19 @@ jobs:
 
       - name: Setup build environment
         run: |
+          # Enable multilib
           if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
             printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
           else
             sed -i '/^\[multilib\]/,/^$/{/^#/s/^#//}' /etc/pacman.conf
           fi
-          grep -A2 '^\[multilib\]' /etc/pacman.conf || true
-          pacman -Sy --noconfirm
-          pacman -Sl multilib 2>/dev/null | wc -l && echo "multilib OK" || echo "multilib NOT available"
-          pacman -S --noconfirm --needed base-devel git go pacman neovim nodejs npm python gnupg github-cli 2>&1 | tee /tmp/pacman.log || {
-            echo "ERROR: pacman install failed"
-            tail -30 /tmp/pacman.log
-            exit 1
-          }
+          pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           useradd -m builder 2>/dev/null || true
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R builder "$GITHUB_WORKSPACE"
 
-          for f in pkgbuilds/*/.hoopoo/package.json; do
-            [[ -f $f ]] || continue
-            python3 -c "import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get('gpg_keys',[])]" "$f" 2>/dev/null
-          done | sort -u | while read key; do
-            sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys "$key" || true
-          done
-
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-          chown -R builder "$GITHUB_WORKSPACE"
-
-          # Import GPG keys from all package.json files
+          # Import GPG keys from per-package .hoopoo/package.json
           for f in pkgbuilds/*/.hoopoo/package.json; do
             [[ -f $f ]] || continue
             python3 -c "import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get('gpg_keys',[])]" "$f" 2>/dev/null
@@ -98,9 +81,8 @@ jobs:
           if [[ -n $needed_deps && -f /tmp/release.json ]]; then
             mkdir -p /tmp/hoopoo-deps
             for dep in $needed_deps; do
-              echo "Looking for dep: $dep"
+              echo "Installing hoopoo dep: $dep"
               url=$(python3 bin/find-dep-url.py /tmp/release.json "$dep" 2>/dev/null)
-              echo "URL: $url"
               [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst" && echo "Downloaded $dep"
             done
             for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
