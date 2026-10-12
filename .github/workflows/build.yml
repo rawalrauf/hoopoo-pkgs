@@ -140,6 +140,20 @@ jobs:
 
       - name: Generate pacman repo database
         run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          mkdir -p output
+
+          # Download existing packages from release to merge into db
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/release.json 2>/dev/null || true
+          if [[ -f /tmp/release.json ]]; then
+            grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | grep '\.pkg\.tar\.zst$' | grep -v debug | while read url; do
+              name=$(basename "$url")
+              [[ -f output/$name ]] || curl -sL "$url" -o "output/$name"
+            done
+          fi
+
           cd output
           shopt -s nullglob
           pkgs=(*.pkg.tar.zst)
@@ -147,6 +161,8 @@ jobs:
             repo-add hoopoo.db.tar.gz "${pkgs[@]}"
           fi
           ls -lh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure release exists
         run: |
