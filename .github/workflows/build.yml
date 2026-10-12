@@ -35,7 +35,7 @@ jobs:
             sed -i '/^\[multilib\]/,/^$/{/^#/s/^#//}' /etc/pacman.conf
           fi
           grep -A2 '^\[multilib\]' /etc/pacman.conf || true
-          pacman -Sy --noconfirm
+          pacman -Syu --noconfirm
           pacman -Sl multilib 2>/dev/null | wc -l && echo "multilib OK" || echo "multilib NOT available"
           pacman -S --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
