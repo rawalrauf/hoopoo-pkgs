@@ -30,7 +30,11 @@ jobs:
       - name: Setup build environment
         run: |
           sed -i '/^\[multilib\]/,/^$/{/^#/s/^#//}' /etc/pacman.conf
+          echo "=== pacman.conf multilib section ==="
+          grep -A2 "\[multilib\]" /etc/pacman.conf
           pacman -Sy --noconfirm
+          echo "=== repos synced ==="
+          pacman -Sl multilib 2>/dev/null | head -3 && echo "multilib OK" || echo "multilib NOT available"
           pacman -S --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           useradd -m builder
@@ -77,8 +81,10 @@ jobs:
           if [[ -n $needed_deps && -f /tmp/release.json ]]; then
             mkdir -p /tmp/hoopoo-deps
             for dep in $needed_deps; do
-              url=$(python3 -c "import json,re,sys; d=json.load(open('/tmp/release.json')); [print(a['browser_download_url']) or exit(0) for a in d.get('assets',[]) if re.match(r'^'+re.escape(sys.argv[1])+r'-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$',a['name']) and 'debug' not in a['name']]" "$dep" 2>/dev/null | head -1)
-              [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst"
+              echo "Looking for dep: $dep"
+              url=$(python3 bin/find-dep-url.py /tmp/release.json "$dep" 2>/dev/null)
+              echo "URL: $url"
+              [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst" && echo "Downloaded $dep"
             done
             for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
               [[ -f $pkg ]] && pacman -U --noconfirm "$pkg" 2>/dev/null || true
