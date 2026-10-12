@@ -66,7 +66,7 @@ jobs:
 
       - name: Install hoopoo packages as dependencies
         run: |
-          TAG="${{ github.ref_name == 'stable' && 'stable' || github.ref_name }}"
+          if [[ "${{ github.ref_name }}" == "stable" ]]; then TAG="stable"; else TAG="${{ github.ref_name }}"; fi
           curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
