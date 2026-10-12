@@ -54,13 +54,18 @@ jobs:
       - name: Determine packages to build
         id: packages
         run: |
+          echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
+          git log --oneline -3
+
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
             echo "pkgs=${{ github.event.inputs.packages }}" >> $GITHUB_OUTPUT
           else
             changed=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '^pkgbuilds/' | cut -d/ -f2 | sort -u | tr '\n' ' ')
             if [[ -z $changed ]]; then
+              echo "No changes detected, building all packages"
               changed=$(ls pkgbuilds/ | tr '\n' ' ')
             fi
+            echo "Building: $changed"
             echo "pkgs=$changed" >> $GITHUB_OUTPUT
           fi
 
