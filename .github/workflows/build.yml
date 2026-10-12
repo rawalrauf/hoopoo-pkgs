@@ -26,25 +26,17 @@ jobs:
 
       - name: Setup build environment
         run: |
-          # Enable multilib repo for lib32 packages
           sed -i '/^#\[multilib\]/{s/^#//;n;s/^#//}' /etc/pacman.conf
           pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
-          # Create non-root build user (makepkg refuses to run as root)
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-
-          # Allow builder to write to workspace
           chown -R builder "$GITHUB_WORKSPACE"
 
-          # Import GPG keys declared in each package's .hoopoo/package.json
-          find pkgbuilds -name 'package.json' | while read f; do
-            python3 -c "
-import json, sys
-d = json.load(open('$f'))
-for k in d.get('gpg_keys', []):
-    print(k)
-" 2>/dev/null
+          # Import GPG keys from all package.json files
+          for f in pkgbuilds/*/.hoopoo/package.json; do
+            [[ -f $f ]] || continue
+            python3 -c "import json,sys; [print(k) for k in json.load(open(sys.argv[1])).get('gpg_keys',[])]" "$f" 2>/dev/null
           done | sort -u | while read key; do
             sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys "$key" || true
           done
@@ -55,8 +47,7 @@ for k in d.get('gpg_keys', []):
           if [[ -n "${{ github.event.inputs.packages }}" ]]; then
             echo "pkgs=${{ github.event.inputs.packages }}" >> $GITHUB_OUTPUT
           else
-            changed=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | \
-              grep '^pkgbuilds/' | cut -d/ -f2 | sort -u | tr '\n' ' ')
+            changed=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '^pkgbuilds/' | cut -d/ -f2 | sort -u | tr '\n' ' ')
             if [[ -z $changed ]]; then
               changed=$(ls pkgbuilds/ | tr '\n' ' ')
             fi
@@ -70,26 +61,19 @@ for k in d.get('gpg_keys', []):
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
 
-          # Collect hoopoo_deps declared in .hoopoo/package.json for packages being built
+          # Collect hoopoo_deps for packages being built
           needed_deps=""
           for pkg in ${{ steps.packages.outputs.pkgs }}; do
             pkgjson="pkgbuilds/$pkg/.hoopoo/package.json"
             [[ -f $pkgjson ]] || continue
-            deps=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(' '.join(d.get('hoopoo_deps',[])))" 2>/dev/null)
+            deps=$(python3 -c "import json,sys; print(' '.join(json.load(open(sys.argv[1])).get('hoopoo_deps',[])))" "$pkgjson" 2>/dev/null)
             needed_deps="$needed_deps $deps"
           done
 
           if [[ -n $needed_deps && -f /tmp/release.json ]]; then
             mkdir -p /tmp/hoopoo-deps
             for dep in $needed_deps; do
-              url=$(python3 -c "
-import json, re
-d = json.load(open('/tmp/release.json'))
-for a in d.get('assets', []):
-    if re.match(r'^${dep}-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$', a['name']) and 'debug' not in a['name']:
-        print(a['browser_download_url'])
-        break
-" 2>/dev/null)
+              url=$(python3 -c "import json,re,sys; d=json.load(open('/tmp/release.json')); [print(a['browser_download_url']) for a in d.get('assets',[]) if re.match(r'^'+sys.argv[1]+r'-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$',a['name']) and 'debug' not in a['name']] and exit()" "$dep" 2>/dev/null | head -1)
               [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst"
             done
             for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
@@ -106,11 +90,10 @@ for a in d.get('assets', []):
             [[ -d pkgbuilds/$pkg ]] || continue
             echo "=== Building $pkg ==="
 
-            # Read per-package build flags from .hoopoo/package.json
             extra_flags=""
             pkgjson="pkgbuilds/$pkg/.hoopoo/package.json"
             if [[ -f $pkgjson ]]; then
-              nocheck=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(d.get('nocheck',''))" 2>/dev/null)
+              nocheck=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('nocheck',''))" "$pkgjson" 2>/dev/null)
               [[ $nocheck == "true" ]] && extra_flags="--nocheck"
             fi
 
@@ -166,13 +149,11 @@ for a in d.get('assets', []):
           set -euo pipefail
           TAG="${{ steps.tag.outputs.name }}"
 
-          # Explicitly delete db/files assets first
           for asset in hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
             gh release delete-asset "$TAG" "$asset" \
               --repo "${{ github.repository }}" --yes 2>/dev/null || true
           done
 
-          # Upload with clobber for any remaining pkg conflicts
           cd output
           files_to_upload="*.pkg.tar.zst"
           [[ -f hoopoo.db.tar.gz ]] && files_to_upload+=" hoopoo.db.tar.gz"
