@@ -15,5 +15,8 @@
   "origin": {
     "aur": "spotify",
     "commit": "0af779c21295d2875d06b07f8760a0e98256f3e4"
-  }
+  },
+  "gpg_keys": [
+    "5384CE82BA52C83A"
+  ]
 }

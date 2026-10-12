@@ -35,15 +35,17 @@ jobs:
           # Allow builder to write to workspace
           chown -R builder "$GITHUB_WORKSPACE"
 
-          # Import Spotify GPG key for signature verification
-          sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 5384CE82BA52C83A || true
-
-          # Import Linux kernel GPG keys
-          sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 38DBBDC86092693E || true
-          sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys B8AC08600F108CDF || true
-
-          # Import vi GPG key
-          sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 51E8B148A9999C34 || true
+          # Import GPG keys declared in each package's .hoopoo/package.json
+          find pkgbuilds -name 'package.json' | while read f; do
+            python3 -c "
+import json, sys
+d = json.load(open('$f'))
+for k in d.get('gpg_keys', []):
+    print(k)
+" 2>/dev/null
+          done | sort -u | while read key; do
+            sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys "$key" || true
+          done
 
       - name: Determine packages to build
         id: packages
@@ -85,10 +87,19 @@ jobs:
           for pkg in ${{ steps.packages.outputs.pkgs }}; do
             [[ -d pkgbuilds/$pkg ]] || continue
             echo "=== Building $pkg ==="
+
+            # Read per-package build flags from .hoopoo/package.json
+            extra_flags=""
+            pkgjson="pkgbuilds/$pkg/.hoopoo/package.json"
+            if [[ -f $pkgjson ]]; then
+              nocheck=$(python3 -c "import json; d=json.load(open('$pkgjson')); print(d.get('nocheck',''))" 2>/dev/null)
+              [[ $nocheck == "true" ]] && extra_flags="--nocheck"
+            fi
+
             cp -r pkgbuilds/$pkg /tmp/build-$pkg
             chown -R builder /tmp/build-$pkg
             cd /tmp/build-$pkg
-            sudo -u builder makepkg -s --noconfirm --noprogressbar --needed --nocheck 2>&1 || {
+            sudo -u builder makepkg -s --noconfirm --noprogressbar --needed $extra_flags 2>&1 || {
               echo "FAILED: $pkg" ; cd $GITHUB_WORKSPACE ; continue
             }
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/output/ 2>/dev/null || true
