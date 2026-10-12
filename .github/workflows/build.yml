@@ -37,7 +37,7 @@ jobs:
           grep -A2 '^\[multilib\]' /etc/pacman.conf || true
           pacman -Sy --noconfirm
           pacman -Sl multilib 2>/dev/null | wc -l && echo "multilib OK" || echo "multilib NOT available"
-          pacman -S --noconfirm --needed base-devel git go pacman neovim nodejs npm python gnupg github-cli
+          pacman -S --noconfirm --needed base-devel git go pacman neovim nodejs npm python gnupg github-cli 2>&1 | grep -v "Failed to resolve specifier" | grep -v "uninitialized /etc/"; true
 
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
