@@ -35,9 +35,9 @@ jobs:
             sed -i '/^\[multilib\]/,/^$/{/^#/s/^#//}' /etc/pacman.conf
           fi
           grep -A2 '^\[multilib\]' /etc/pacman.conf || true
-          pacman -Syu --noconfirm
+          pacman -Sy --noconfirm
           pacman -Sl multilib 2>/dev/null | wc -l && echo "multilib OK" || echo "multilib NOT available"
-          pacman -S --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
+          pacman -S --noconfirm --needed base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           useradd -m builder
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
