@@ -26,7 +26,7 @@ jobs:
 
       - name: Setup build environment
         run: |
-          sed -i '/^#\[multilib\]/{s/^#//;n;s/^#//}' /etc/pacman.conf
+          sed -i '/^\[multilib\]/,/^$/{/^#/s/^#//}' /etc/pacman.conf
           pacman -Sy --noconfirm base-devel git go pacman neovim nodejs npm python gnupg github-cli
 
           useradd -m builder
@@ -73,7 +73,7 @@ jobs:
           if [[ -n $needed_deps && -f /tmp/release.json ]]; then
             mkdir -p /tmp/hoopoo-deps
             for dep in $needed_deps; do
-              url=$(python3 -c "import json,re,sys; d=json.load(open('/tmp/release.json')); [print(a['browser_download_url']) for a in d.get('assets',[]) if re.match(r'^'+sys.argv[1]+r'-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$',a['name']) and 'debug' not in a['name']] and exit()" "$dep" 2>/dev/null | head -1)
+              url=$(python3 -c "import json,re,sys; d=json.load(open('/tmp/release.json')); [print(a['browser_download_url']) or exit(0) for a in d.get('assets',[]) if re.match(r'^'+re.escape(sys.argv[1])+r'-[^-]+-[^-]+-[^-]+\.pkg\.tar\.zst$',a['name']) and 'debug' not in a['name']]" "$dep" 2>/dev/null | head -1)
               [[ -n $url ]] && curl -sL "$url" -o "/tmp/hoopoo-deps/${dep}.pkg.tar.zst"
             done
             for pkg in /tmp/hoopoo-deps/*.pkg.tar.zst; do
