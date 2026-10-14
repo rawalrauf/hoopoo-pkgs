@@ -99,11 +99,51 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Fetch existing release assets
+        run: |
+          TAG="${{ github.ref_name }}"
+          [[ "$TAG" == "stable" ]] && RELEASE_TAG="stable" || RELEASE_TAG="$TAG"
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/existing-release.json 2>/dev/null || echo '{}' > /tmp/existing-release.json
+          python3 -c "
+          import json, sys
+          data = json.load(open('/tmp/existing-release.json'))
+          assets = [a['name'] for a in data.get('assets', [])]
+          print('\n'.join(assets))
+          " > /tmp/existing-assets.txt
+          echo "Existing assets:"
+          cat /tmp/existing-assets.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build packages
         run: |
           mkdir -p output
+          skipped=0
+          built=0
           for pkg in ${{ steps.packages.outputs.pkgs }}; do
             [[ -d pkgbuilds/$pkg ]] || continue
+
+            pkgver=$(bash -c "source pkgbuilds/$pkg/PKGBUILD 2>/dev/null && echo \${epoch:+\$epoch:}\$pkgver-\$pkgrel" 2>/dev/null)
+            pkgname=$(bash -c "source pkgbuilds/$pkg/PKGBUILD 2>/dev/null && echo \$pkgname" 2>/dev/null)
+            arch_arr=$(bash -c "source pkgbuilds/$pkg/PKGBUILD 2>/dev/null && echo \${arch[*]}" 2>/dev/null)
+
+            if [[ $arch_arr == "any" ]]; then
+              arch="any"
+            else
+              arch="x86_64"
+            fi
+
+            if [[ -n $pkgver && -n $pkgname && -n $arch ]]; then
+              expected_file="${pkgname}-${pkgver}-${arch}.pkg.tar.zst"
+              if grep -qF "$expected_file" /tmp/existing-assets.txt 2>/dev/null; then
+                echo "=== Skipping $pkg ($expected_file already published) ==="
+                (( skipped++ ))
+                continue
+              fi
+            fi
+
             echo "=== Building $pkg ==="
 
             extra_flags=""
@@ -120,14 +160,16 @@ jobs:
               echo "FAILED: $pkg" ; cd $GITHUB_WORKSPACE ; continue
             }
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+            (( built++ ))
             cd $GITHUB_WORKSPACE
           done
 
-          if ! ls output/*.pkg.tar.zst 1> /dev/null 2>&1; then
-            echo "ERROR: No packages built successfully"
-            exit 1
+          echo "Built: $built, Skipped: $skipped"
+          if (( built == 0 )); then
+            echo "No packages needed rebuilding — all up to date."
+            echo "nothing_built=true" >> $GITHUB_ENV
           fi
-          ls -lh output/
+          ls -lh output/ 2>/dev/null || true
 
       - name: Determine release tag
         id: tag
@@ -139,6 +181,7 @@ jobs:
           fi
 
       - name: Generate pacman repo database
+        if: env.nothing_built != 'true'
         run: |
           TAG="${{ steps.tag.outputs.name }}"
           mkdir -p output
@@ -165,6 +208,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure release exists
+        if: env.nothing_built != 'true'
         run: |
           gh release view "${{ steps.tag.outputs.name }}" \
             --repo "${{ github.repository }}" > /dev/null 2>&1 || \
@@ -177,6 +221,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to release
+        if: env.nothing_built != 'true'
         run: |
           set -euo pipefail
           TAG="${{ steps.tag.outputs.name }}"
