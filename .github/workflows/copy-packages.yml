@@ -1,0 +1,174 @@
+name: Copy Packages Between Branches
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Space-separated list of packages to copy (e.g. linux-ptl nvidia-580xx-utils)'
+        required: true
+      from:
+        description: 'Source branch/release'
+        required: true
+        default: 'edge'
+        type: choice
+        options:
+          - edge
+          - stable
+      to:
+        description: 'Destination branch/release'
+        required: true
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - edge
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup tools
+        run: pacman -Sy --noconfirm pacman github-cli python curl
+
+      - name: Fetch source and destination release metadata
+        run: |
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.from }}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/src-release.json
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.to }}" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/dst-release.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find matching packages in source release
+        run: |
+          python3 << 'EOF'
+          import json, os
+
+          pkgs = os.environ['PACKAGES'].split()
+          src = json.load(open('/tmp/src-release.json'))
+          dst = json.load(open('/tmp/dst-release.json'))
+
+          src_assets = {a['name']: a['browser_download_url'] for a in src.get('assets', [])}
+          dst_assets = {a['name'] for a in dst.get('assets', [])}
+
+          to_copy = []
+          to_replace = []
+
+          def pkgbase(name):
+            n = name.replace('.pkg.tar.zst', '')
+            parts = n.rsplit('-', 3)
+            return parts[0] if len(parts) == 4 else n
+
+          for name, url in src_assets.items():
+            if not name.endswith('.pkg.tar.zst'):
+              continue
+            base = pkgbase(name)
+            if not any(base.startswith(p) or base == p for p in pkgs):
+              continue
+            to_copy.append((name, url))
+            print(f"COPY: {name}")
+
+            # Find old versions in dst to replace
+            for dname in dst_assets:
+              if pkgbase(dname) == base and dname != name:
+                to_replace.append(dname)
+                print(f"  REPLACE: {dname}")
+
+          if not to_copy:
+            print("No matching packages found in source release.")
+            with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write("nothing_to_copy=true\n")
+          else:
+            with open('/tmp/copy-list.txt', 'w') as f:
+              f.write('\n'.join(f"{n}|{u}" for n, u in to_copy) + '\n')
+            with open('/tmp/replace-list.txt', 'w') as f:
+              f.write('\n'.join(to_replace) + '\n')
+            print(f"\nTotal to copy: {len(to_copy)}, replacing: {len(to_replace)}")
+          EOF
+        env:
+          PACKAGES: ${{ github.event.inputs.packages }}
+
+      - name: Download packages from source
+        if: env.nothing_to_copy != 'true'
+        run: |
+          mkdir -p /tmp/copy-output
+          while IFS='|' read -r name url; do
+            [[ -z $name ]] && continue
+            echo "Downloading $name"
+            curl -sL "$url" -o "/tmp/copy-output/$name"
+          done < /tmp/copy-list.txt
+
+      - name: Generate updated destination database
+        if: env.nothing_to_copy != 'true'
+        run: |
+          replace_list=$(cat /tmp/replace-list.txt 2>/dev/null || true)
+
+          # Download existing destination packages except ones being replaced
+          grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/dst-release.json \
+            | grep '\.pkg\.tar\.zst$' | grep -v -- '-debug-' | while read url; do
+              name=$(basename "$url")
+              if echo "$replace_list" | grep -qF "$name"; then
+                echo "Dropping old version: $name"
+                continue
+              fi
+              [[ -f /tmp/copy-output/$name ]] || curl -sL "$url" -o "/tmp/copy-output/$name"
+            done
+
+          cd /tmp/copy-output
+          shopt -s nullglob
+          pkgs=(*.pkg.tar.zst)
+          if (( ${#pkgs[@]} > 0 )); then
+            repo-add hoopoo.db.tar.gz "${pkgs[@]}"
+          fi
+          ls -lh
+
+      - name: Ensure destination release exists
+        if: env.nothing_to_copy != 'true'
+        run: |
+          gh release view "${{ github.event.inputs.to }}" \
+            --repo "${{ github.repository }}" > /dev/null 2>&1 || \
+          gh release create "${{ github.event.inputs.to }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.event.inputs.to }}" \
+            --notes "Automated release" \
+            --latest=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete old versions from destination and upload new
+        if: env.nothing_to_copy != 'true'
+        run: |
+          DST="${{ github.event.inputs.to }}"
+
+          # Delete old versions being replaced
+          while read -r name; do
+            [[ -z $name ]] && continue
+            echo "Deleting old asset from $DST: $name"
+            gh release delete-asset "$DST" "$name" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done < /tmp/replace-list.txt
+
+          # Replace db files
+          for asset in hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            gh release delete-asset "$DST" "$asset" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done
+
+          cd /tmp/copy-output
+          files_to_upload=""
+          for f in *.pkg.tar.zst hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            [[ -f $f ]] && files_to_upload="$files_to_upload $f"
+          done
+          [[ -n ${files_to_upload// /} ]] && gh release upload "$DST" $files_to_upload \
+            --repo "${{ github.repository }}" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
