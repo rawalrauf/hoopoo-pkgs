@@ -112,16 +112,49 @@ jobs:
         run: |
           replace_list=$(cat /tmp/replace-list.txt 2>/dev/null || true)
 
-          # Download existing destination packages except ones being replaced
-          grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/dst-release.json \
-            | grep '\.pkg\.tar\.zst$' | grep -v -- '-debug-' | while read url; do
-              name=$(basename "$url")
-              if echo "$replace_list" | grep -qF "$name"; then
-                echo "Dropping old version: $name"
-                continue
-              fi
-              [[ -f /tmp/copy-output/$name ]] || curl -sL "$url" -o "/tmp/copy-output/$name"
-            done
+          python3 << 'EOF'
+          import json, re
+
+          def pkgbase(name):
+            n = name.replace('.pkg.tar.zst', '')
+            parts = n.rsplit('-', 3)
+            return parts[0] if len(parts) == 4 else n
+
+          # Build set of pkgbases already in copy-output (newly copied)
+          import os
+          new_bases = {pkgbase(f) for f in os.listdir('/tmp/copy-output') if f.endswith('.pkg.tar.zst')}
+
+          # Find all existing dst packages to keep (skip old versions of same pkgbase)
+          dst = json.load(open('/tmp/dst-release.json'))
+          seen_bases = set(new_bases)
+          to_download = []
+          to_skip = []
+
+          for asset in dst.get('assets', []):
+            name = asset['name']
+            if not name.endswith('.pkg.tar.zst') or '-debug-' in name:
+              continue
+            base = pkgbase(name)
+            if base in seen_bases:
+              to_skip.append(name)
+              continue
+            seen_bases.add(base)
+            to_download.append((name, asset['browser_download_url']))
+
+          with open('/tmp/dst-keep.txt', 'w') as f:
+            f.write('\n'.join(f"{n}|{u}" for n, u in to_download) + '\n')
+          with open('/tmp/dst-remove.txt', 'w') as f:
+            f.write('\n'.join(to_skip) + '\n')
+
+          print(f"Keeping: {len(to_download)}, Removing duplicates: {len(to_skip)}")
+          for s in to_skip:
+            print(f"  REMOVE duplicate: {s}")
+          EOF
+
+          while IFS='|' read -r name url; do
+            [[ -z $name ]] && continue
+            [[ -f /tmp/copy-output/$name ]] || curl -sL "$url" -o "/tmp/copy-output/$name"
+          done < /tmp/dst-keep.txt
 
           cd /tmp/copy-output
           shopt -s nullglob
