@@ -41,6 +41,11 @@ jobs:
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R builder "$GITHUB_WORKSPACE"
 
+          # TODO: Once hoopoo-keyring is published, install it here so builds can
+          # verify GPG-signed sources against the Hoopoo key:
+          #   pacman -U --noconfirm <hoopoo-keyring-url>
+          #   pacman-key --populate hoopoo
+
           # Import GPG keys from per-package .hoopoo/package.json
           for f in pkgbuilds/*/.hoopoo/package.json; do
             [[ -f $f ]] || continue

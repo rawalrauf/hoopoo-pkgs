@@ -1,0 +1,22 @@
+# Maintainer: Hoopoo
+pkgname=hoopoo-keyring
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Hoopoo Linux PGP keyring'
+arch=('any')
+url='https://github.com/rawalrauf/hoopoo-pkgs'
+license=('GPL-3.0-or-later')
+# TODO: Once GPG key is generated, add it to this directory as hoopoo.gpg
+# and update the sha256sum below
+source=('hoopoo.gpg')
+sha256sums=('SKIP')
+
+package() {
+  install -Dm644 hoopoo.gpg "$pkgdir/usr/share/pacman/keyrings/hoopoo.gpg"
+
+  # TODO: Generate hoopoo-trusted and hoopoo-revoked files after key is created:
+  # - hoopoo-trusted: list of trusted key fingerprints (one per line)
+  # - hoopoo-revoked: list of revoked key fingerprints (one per line)
+  # install -Dm644 hoopoo-trusted "$pkgdir/usr/share/pacman/keyrings/hoopoo-trusted"
+  # install -Dm644 hoopoo-revoked "$pkgdir/usr/share/pacman/keyrings/hoopoo-revoked"
+}
