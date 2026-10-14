@@ -155,7 +155,11 @@ jobs:
             fi
 
             if [[ -n $pkgver && -n $pkgname && -n $arch ]]; then
-              expected_file="${pkgname}-${pkgver//:/.}-${arch}.pkg.tar.zst"
+              # Encode pkgver the same way pacman does for filenames:
+              # colons -> dots, + -> .2B
+              encoded_ver="${pkgver//:/.}"
+              encoded_ver="${encoded_ver//+/.2B}"
+              expected_file="${pkgname}-${encoded_ver}-${arch}.pkg.tar.zst"
               if grep -qF "$expected_file" /tmp/existing-assets.txt 2>/dev/null; then
                 echo "=== Skipping $pkg ($expected_file already published) ==="
                 skipped=$(( skipped + 1 ))
