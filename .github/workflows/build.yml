@@ -136,10 +136,10 @@ jobs:
             fi
 
             if [[ -n $pkgver && -n $pkgname && -n $arch ]]; then
-              expected_file="${pkgname}-${pkgver}-${arch}.pkg.tar.zst"
+              expected_file="${pkgname}-${pkgver//:/.}-${arch}.pkg.tar.zst"
               if grep -qF "$expected_file" /tmp/existing-assets.txt 2>/dev/null; then
                 echo "=== Skipping $pkg ($expected_file already published) ==="
-                (( skipped++ ))
+                skipped=$(( skipped + 1 ))
                 continue
               fi
             fi
@@ -160,7 +160,7 @@ jobs:
               echo "FAILED: $pkg" ; cd $GITHUB_WORKSPACE ; continue
             }
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/output/ 2>/dev/null || true
-            (( built++ ))
+            built=$(( built + 1 ))
             cd $GITHUB_WORKSPACE
           done
 
