@@ -41,6 +41,21 @@ jobs:
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           chown -R builder "$GITHUB_WORKSPACE"
 
+          # Import Hoopoo signing key
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import --no-default-keyring --keyring /etc/pacman.d/gnupg/pubring.gpg 2>/dev/null || true
+          echo "allow-preset-passphrase" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys Hoopoo 2>/dev/null | grep Keygrip | head -1 | awk '{print $3}')
+          if [[ -n $KEYGRIP ]]; then
+            /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE" 2>/dev/null || true
+          fi
+          # Copy signing key to builder user
+          mkdir -p /home/builder/.gnupg
+          chmod 700 /home/builder/.gnupg
+          cp -r ~/.gnupg/* /home/builder/.gnupg/ 2>/dev/null || true
+          chown -R builder:builder /home/builder/.gnupg
+
           # TODO: Once hoopoo-keyring is published, install it here so builds can
           # verify GPG-signed sources against the Hoopoo key:
           #   pacman -U --noconfirm <hoopoo-keyring-url>
@@ -53,6 +68,9 @@ jobs:
           done | sort -u | while read key; do
             sudo -u builder gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys "$key" || true
           done
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Determine packages to build
         id: packages
@@ -176,6 +194,20 @@ jobs:
           fi
           ls -lh output/ 2>/dev/null || true
 
+      - name: Sign packages
+        if: env.nothing_built != 'true'
+        run: |
+          for pkg in output/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            echo "Signing $pkg"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --detach-sign "$pkg"
+          done
+          ls output/*.sig 2>/dev/null || echo "No signatures generated"
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
       - name: Determine release tag
         id: tag
         run: |
@@ -237,11 +269,10 @@ jobs:
           done
 
           cd output
-          files_to_upload="*.pkg.tar.zst"
-          [[ -f hoopoo.db.tar.gz ]] && files_to_upload+=" hoopoo.db.tar.gz"
-          [[ -f hoopoo.db ]] && files_to_upload+=" hoopoo.db"
-          [[ -f hoopoo.files.tar.gz ]] && files_to_upload+=" hoopoo.files.tar.gz"
-          [[ -f hoopoo.files ]] && files_to_upload+=" hoopoo.files"
+          files_to_upload=""
+          for f in *.pkg.tar.zst *.pkg.tar.zst.sig hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            [[ -f $f ]] && files_to_upload="$files_to_upload $f"
+          done
 
           gh release upload "$TAG" $files_to_upload \
             --repo "${{ github.repository }}" \
