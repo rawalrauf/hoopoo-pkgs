@@ -4,16 +4,26 @@ Personal pacman repository for [Hoopoo](https://github.com/rawalrauf/omarchy) �
 
 ## Add to pacman
 
+First install the keyring to trust Hoopoo packages:
+
+```bash
+sudo pacman-key --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD --keyserver keys.openpgp.org
+sudo pacman-key --lsign-key 070030E5D914817BA797F66AAF1C8F036A5E73FD
+sudo pacman -U https://github.com/rawalrauf/hoopoo-pkgs/releases/download/stable/hoopoo-keyring-1.0.0-1-any.pkg.tar.zst
+```
+
+Then add to `/etc/pacman.conf`:
+
 ```ini
 [hoopoo]
-SigLevel = Optional TrustAll
+SigLevel = Required DatabaseOptional
 Server = https://github.com/rawalrauf/hoopoo-pkgs/releases/download/stable
 ```
 
 ## Branches
 
-- `stable` — tested, used for installs
-- `edge` — auto-syncs upstream every 6h, built automatically on push
+- `stable` — packages promoted from edge after 14-day testing window
+- `edge` — latest versions, built automatically on push or upstream update
 
 ## Adding a package
 
@@ -51,6 +61,7 @@ Create `pkgbuilds/<pkgname>/PKGBUILD` and optionally `pkgbuilds/<pkgname>/.hoopo
 
 | Package | Source | Description |
 |---------|--------|-------------|
+| hoopoo-keyring | local | Hoopoo Linux PGP keyring |
 | elephant | AUR | Walker data provider daemon |
 | elephant-* | AUR | Walker provider plugins |
 | aether | omacom | App/theme launcher |
