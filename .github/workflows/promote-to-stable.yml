@@ -1,0 +1,248 @@
+name: Promote Edge to Stable
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Space-separated list of packages to force-promote (empty = auto)'
+        required: false
+      min_age_days:
+        description: 'Minimum days on edge before promotion (default: 14)'
+        required: false
+        default: '14'
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup tools
+        run: pacman -Sy --noconfirm pacman github-cli python curl
+
+      - name: Fetch edge and stable release metadata
+        run: |
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/edge" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/edge-release.json
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/stable" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o /tmp/stable-release.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine packages to promote
+        run: |
+          python3 << 'EOF'
+          import json, os
+          from datetime import datetime, timezone
+
+          min_age = int(os.environ.get('MIN_AGE', '14'))
+          force_pkgs = os.environ.get('FORCE_PKGS', '').split()
+
+          edge = json.load(open('/tmp/edge-release.json'))
+          stable = json.load(open('/tmp/stable-release.json'))
+
+          now = datetime.now(timezone.utc)
+
+          stable_assets = {a['name']: a for a in stable.get('assets', [])}
+          edge_assets = {a['name']: a for a in edge.get('assets', [])}
+
+          # Build a map of pkgbase -> all versions on edge
+          # pkgbase is derived by stripping pkgver-pkgrel-arch.pkg.tar.zst
+          def pkgbase(name):
+            # name like: walker-2.17.2-1-x86_64.pkg.tar.zst
+            # strip from right: arch, pkgrel, pkgver
+            n = name.replace('.pkg.tar.zst', '')
+            parts = n.rsplit('-', 3)  # [pkgbase, pkgver, pkgrel, arch]
+            return parts[0] if len(parts) == 4 else n
+
+          to_promote = []   # (filename, url)
+          to_delete_edge = []   # filenames to remove from edge after promotion
+          to_delete_stable = [] # old stable filenames to remove before uploading new
+
+          promoted_bases = set()
+
+          for name, asset in sorted(edge_assets.items(), key=lambda x: x[1]['updated_at']):
+            if not name.endswith('.pkg.tar.zst') or '-debug-' in name:
+              continue
+
+            base = pkgbase(name)
+
+            # If force list given, only process those
+            if force_pkgs and not any(base.startswith(p) for p in force_pkgs):
+              continue
+
+            # Check age
+            updated_at = datetime.fromisoformat(asset['updated_at'].replace('Z', '+00:00'))
+            age_days = (now - updated_at).days
+
+            if not force_pkgs and age_days < min_age:
+              print(f"SKIP (too new, {age_days}d): {name}")
+              continue
+
+            # Already in stable at same version — still mark for edge cleanup if old
+            if name in stable_assets:
+              print(f"SKIP (already in stable): {name}")
+              to_delete_edge.append(name)
+              continue
+
+            # Find any older versions of same package in stable to replace
+            for sname in list(stable_assets.keys()):
+              if pkgbase(sname) == base and sname != name:
+                print(f"  REPLACE in stable: {sname} -> {name}")
+                to_delete_stable.append(sname)
+
+            to_promote.append((name, asset['browser_download_url']))
+            to_delete_edge.append(name)
+            promoted_bases.add(base)
+            print(f"PROMOTE ({age_days}d old): {name}")
+
+          if not to_promote:
+            print("Nothing to promote.")
+            with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write("nothing_to_promote=true\n")
+          else:
+            with open('/tmp/promote-list.txt', 'w') as f:
+              f.write('\n'.join(f"{n}|{u}" for n, u in to_promote) + '\n')
+            with open('/tmp/delete-edge-list.txt', 'w') as f:
+              f.write('\n'.join(to_delete_edge) + '\n')
+            with open('/tmp/delete-stable-list.txt', 'w') as f:
+              f.write('\n'.join(to_delete_stable) + '\n')
+            print(f"\nTotal to promote: {len(to_promote)}")
+          EOF
+        env:
+          MIN_AGE: ${{ github.event.inputs.min_age_days || '14' }}
+          FORCE_PKGS: ${{ github.event.inputs.packages || '' }}
+
+      - name: Download packages from edge
+        if: env.nothing_to_promote != 'true'
+        run: |
+          mkdir -p /tmp/promote-output
+          while IFS='|' read -r name url; do
+            [[ -z $name ]] && continue
+            echo "Downloading $name"
+            curl -sL "$url" -o "/tmp/promote-output/$name"
+          done < /tmp/promote-list.txt
+
+      - name: Generate updated stable database
+        if: env.nothing_to_promote != 'true'
+        run: |
+          # Download existing stable packages (excluding ones being replaced)
+          delete_list=$(cat /tmp/delete-stable-list.txt 2>/dev/null || true)
+          grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/stable-release.json \
+            | grep '\.pkg\.tar\.zst$' | grep -v -- '-debug-' | while read url; do
+              name=$(basename "$url")
+              # Skip packages being replaced by promoted versions
+              if echo "$delete_list" | grep -qF "$name"; then
+                echo "Dropping old stable version: $name"
+                continue
+              fi
+              [[ -f /tmp/promote-output/$name ]] || curl -sL "$url" -o "/tmp/promote-output/$name"
+            done
+
+          cd /tmp/promote-output
+          shopt -s nullglob
+          pkgs=(*.pkg.tar.zst)
+          if (( ${#pkgs[@]} > 0 )); then
+            repo-add hoopoo.db.tar.gz "${pkgs[@]}"
+          fi
+          ls -lh
+
+      - name: Generate updated edge database
+        if: env.nothing_to_promote != 'true'
+        run: |
+          mkdir -p /tmp/edge-output
+          delete_list=$(cat /tmp/delete-edge-list.txt 2>/dev/null || true)
+
+          # Download all edge packages except the ones being promoted/moved
+          grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/edge-release.json \
+            | grep '\.pkg\.tar\.zst$' | grep -v -- '-debug-' | while read url; do
+              name=$(basename "$url")
+              if echo "$delete_list" | grep -qF "$name"; then
+                echo "Removing from edge: $name"
+                continue
+              fi
+              curl -sL "$url" -o "/tmp/edge-output/$name"
+            done
+
+          cd /tmp/edge-output
+          shopt -s nullglob
+          pkgs=(*.pkg.tar.zst)
+          if (( ${#pkgs[@]} > 0 )); then
+            repo-add hoopoo.db.tar.gz "${pkgs[@]}"
+          fi
+          ls -lh
+
+      - name: Ensure stable release exists
+        if: env.nothing_to_promote != 'true'
+        run: |
+          gh release view stable --repo "${{ github.repository }}" > /dev/null 2>&1 || \
+          gh release create stable \
+            --repo "${{ github.repository }}" \
+            --title "stable" \
+            --notes "Stable channel — packages promoted from edge after 14-day testing window." \
+            --latest=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to stable and clean up old stable versions
+        if: env.nothing_to_promote != 'true'
+        run: |
+          # Remove old stable versions being replaced
+          while read -r name; do
+            [[ -z $name ]] && continue
+            echo "Deleting old stable asset: $name"
+            gh release delete-asset stable "$name" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done < /tmp/delete-stable-list.txt
+
+          # Remove old db files
+          for asset in hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            gh release delete-asset stable "$asset" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done
+
+          cd /tmp/promote-output
+          files_to_upload=""
+          for f in *.pkg.tar.zst hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            [[ -f $f ]] && files_to_upload="$files_to_upload $f"
+          done
+          [[ -n ${files_to_upload// /} ]] && gh release upload stable $files_to_upload \
+            --repo "${{ github.repository }}" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove promoted packages from edge
+        if: env.nothing_to_promote != 'true'
+        run: |
+          # Remove promoted pkg files from edge
+          while read -r name; do
+            [[ -z $name ]] && continue
+            echo "Removing from edge release: $name"
+            gh release delete-asset edge "$name" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done < /tmp/delete-edge-list.txt
+
+          # Replace edge db with updated one (without promoted packages)
+          for asset in hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            gh release delete-asset edge "$asset" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done
+
+          cd /tmp/edge-output
+          files_to_upload=""
+          for f in hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+            [[ -f $f ]] && files_to_upload="$files_to_upload $f"
+          done
+          [[ -n ${files_to_upload// /} ]] && gh release upload edge $files_to_upload \
+            --repo "${{ github.repository }}" --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
