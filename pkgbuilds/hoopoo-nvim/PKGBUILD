@@ -1,7 +1,7 @@
 # Maintainer: Ryan Hughes <ryan@omarchy.org>
 pkgname=hoopoo-nvim
 pkgver=2026.9.21
-pkgrel=4
+pkgrel=5
 pkgdesc="Pre-built LazyVim configuration with cached plugins"
 arch=('any')
 url="https://github.com/LazyVim/LazyVim"
@@ -130,7 +130,7 @@ package() {
   install -dm755 "$pkgdir/etc/skel/.config" "$pkgdir/etc/skel/.local/share"
   cp -a "$pkgdir/usr/share/$pkgname/config" "$pkgdir/etc/skel/.config/nvim"
   cp -a "$pkgdir/usr/share/$pkgname/data" "$pkgdir/etc/skel/.local/share/nvim"
-  ln -snf "../../../../.local/state/omarchy/current/theme/neovim.lua" \
+  ln -snf "../../../../.local/state/hoopoo/current/theme/neovim.lua" \
     "$pkgdir/etc/skel/.config/nvim/lua/plugins/theme.lua"
 
   # Ship the plugin cache once, now that /etc/skel has its copy. Keeping a
