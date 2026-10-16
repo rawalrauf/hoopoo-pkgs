@@ -223,43 +223,51 @@ jobs:
           TAG="${{ steps.tag.outputs.name }}"
           mkdir -p output
 
-          # Build a list of pkgnames we just built so we can skip old versions
-          built_pkgnames=()
-          for f in output/*.pkg.tar.zst; do
-            [[ -f $f ]] || continue
-            base=$(basename "$f" .pkg.tar.zst)
-            pkgname=$(echo "$base" | rev | cut -d- -f4- | rev)
-            built_pkgnames+=("$pkgname")
-          done
-
-          # Download existing packages from release to merge into db, skipping old versions of rebuilt pkgs
           curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
-          if [[ -f /tmp/release.json ]]; then
-            while IFS= read -r url; do
-              name=$(basename "$url")
-              [[ -f output/$name ]] && continue
-              base="${name%.pkg.tar.zst}"
-              pkgname=$(echo "$base" | rev | cut -d- -f4- | rev)
-              skip=false
-              for built in "${built_pkgnames[@]}"; do
-                [[ "$pkgname" == "$built" ]] && skip=true && break
-              done
-              $skip && echo "Skipping old version: $name" && continue
-              curl -sL "$url" -o "output/$name"
-            done < <(grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | grep '\.pkg\.tar\.zst$' | grep -v debug)
-          fi
 
-          # Delete old versions of rebuilt packages from the release assets
-          for pkgname in "${built_pkgnames[@]}"; do
-            while IFS= read -r asset; do
-              [[ -f output/$asset ]] && continue
-              echo "Removing old release asset: $asset"
-              gh release delete-asset "$TAG" "$asset" --repo "${{ github.repository }}" --yes 2>/dev/null || true
-              gh release delete-asset "$TAG" "${asset}.sig" --repo "${{ github.repository }}" --yes 2>/dev/null || true
-            done < <(gh release list-assets "$TAG" --repo "${{ github.repository }}" --json name --jq '.[].name' 2>/dev/null | grep "^${pkgname}-" | grep '\.pkg\.tar\.zst$' | grep -v '\.sig$')
-          done
+          python3 << 'EOF'
+          import json, os
+
+          def pkgbase(name):
+            n = name.replace('.pkg.tar.zst', '')
+            parts = n.rsplit('-', 3)
+            return parts[0] if len(parts) == 4 else n
+
+          new_bases = {pkgbase(f) for f in os.listdir('output') if f.endswith('.pkg.tar.zst')}
+
+          try:
+            release = json.load(open('/tmp/release.json'))
+          except Exception:
+            release = {}
+
+          to_download = []
+          to_remove = []
+          seen = set(new_bases)
+
+          for asset in release.get('assets', []):
+            name = asset['name']
+            if not name.endswith('.pkg.tar.zst') or '-debug-' in name:
+              continue
+            base = pkgbase(name)
+            if base in seen:
+              to_remove.append(name)
+              print(f"Removing old version: {name}")
+              continue
+            seen.add(base)
+            to_download.append((name, asset['browser_download_url']))
+
+          with open('/tmp/keep.txt', 'w') as f:
+            f.write('\n'.join(f"{n}|{u}" for n, u in to_download) + '\n')
+          with open('/tmp/remove.txt', 'w') as f:
+            f.write('\n'.join(to_remove) + '\n')
+          EOF
+
+          while IFS='|' read -r name url; do
+            [[ -z $name ]] && continue
+            [[ -f output/$name ]] || curl -sL "$url" -o "output/$name"
+          done < /tmp/keep.txt
 
           cd output
           shopt -s nullglob
@@ -268,6 +276,21 @@ jobs:
             repo-add hoopoo.db.tar.gz "${pkgs[@]}"
           fi
           ls -lh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete old pkg versions from release
+        if: env.nothing_built != 'true'
+        run: |
+          TAG="${{ steps.tag.outputs.name }}"
+          while read -r name; do
+            [[ -z $name ]] && continue
+            echo "Deleting $name"
+            gh release delete-asset "$TAG" "$name" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+            gh release delete-asset "$TAG" "${name}.sig" \
+              --repo "${{ github.repository }}" --yes 2>/dev/null || true
+          done < /tmp/remove.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
