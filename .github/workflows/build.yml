@@ -227,7 +227,6 @@ jobs:
           built_pkgnames=()
           for f in output/*.pkg.tar.zst; do
             [[ -f $f ]] || continue
-            # Extract pkgname: everything before the last 3 dash-separated fields (pkgver-pkgrel-arch)
             base=$(basename "$f" .pkg.tar.zst)
             pkgname=$(echo "$base" | rev | cut -d- -f4- | rev)
             built_pkgnames+=("$pkgname")
@@ -238,10 +237,9 @@ jobs:
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/release.json 2>/dev/null || true
           if [[ -f /tmp/release.json ]]; then
-            grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | grep '\.pkg\.tar\.zst$' | grep -v debug | while read url; do
+            while IFS= read -r url; do
               name=$(basename "$url")
               [[ -f output/$name ]] && continue
-              # Skip if this is an old version of a package we just rebuilt
               base="${name%.pkg.tar.zst}"
               pkgname=$(echo "$base" | rev | cut -d- -f4- | rev)
               skip=false
@@ -250,17 +248,17 @@ jobs:
               done
               $skip && echo "Skipping old version: $name" && continue
               curl -sL "$url" -o "output/$name"
-            done
+            done < <(grep -oP '"browser_download_url":\s*"\K[^"]+' /tmp/release.json | grep '\.pkg\.tar\.zst$' | grep -v debug)
           fi
 
-          # Also delete old versions of rebuilt packages from the release assets
+          # Delete old versions of rebuilt packages from the release assets
           for pkgname in "${built_pkgnames[@]}"; do
-            gh release list-assets "$TAG" --repo "${{ github.repository }}" --json name --jq '.[].name' 2>/dev/null | grep "^${pkgname}-" | grep '\.pkg\.tar\.zst' | while read asset; do
+            while IFS= read -r asset; do
               [[ -f output/$asset ]] && continue
               echo "Removing old release asset: $asset"
               gh release delete-asset "$TAG" "$asset" --repo "${{ github.repository }}" --yes 2>/dev/null || true
               gh release delete-asset "$TAG" "${asset}.sig" --repo "${{ github.repository }}" --yes 2>/dev/null || true
-            done
+            done < <(gh release list-assets "$TAG" --repo "${{ github.repository }}" --json name --jq '.[].name' 2>/dev/null | grep "^${pkgname}-" | grep '\.pkg\.tar\.zst$' | grep -v '\.sig$')
           done
 
           cd output
