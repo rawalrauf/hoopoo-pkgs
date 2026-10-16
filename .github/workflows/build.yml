@@ -253,7 +253,7 @@ jobs:
             base = pkgbase(name)
             if base in seen:
               to_remove.append(name)
-              print(f"Will remove old version: {name}")
+              print(f"Old version flagged: {name}")
               continue
             seen.add(base)
             to_download.append((name, asset['browser_download_url']))
