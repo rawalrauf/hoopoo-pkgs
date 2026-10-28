@@ -124,6 +124,7 @@ def sync_aur(pkgdir, pkgbuild_path, content, watch):
 
     aur_version = results[0].get('Version', '')
     latest = re.sub(r'-\d+$', '', aur_version)
+    latest = re.sub(r'^\d+:', '', latest)
 
     current_match = re.search(r'^pkgver=(.+)$', content, re.MULTILINE)
     if not current_match:
