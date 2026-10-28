@@ -87,8 +87,7 @@ jobs:
 
       - name: Install hoopoo packages as dependencies
         run: |
-          TAG="${{ github.ref_name }}"
-          [[ "$TAG" == "stable" ]] || TAG="stable"
+          TAG="stable"
           echo "Fetching release: $TAG"
           curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
@@ -124,9 +123,7 @@ jobs:
 
       - name: Fetch existing release assets
         run: |
-          TAG="${{ github.ref_name }}"
-          [[ "$TAG" == "stable" ]] && RELEASE_TAG="stable" || RELEASE_TAG="$TAG"
-          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$RELEASE_TAG" \
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/edge" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/existing-release.json 2>/dev/null || echo '{}' > /tmp/existing-release.json
           python3 -c "
@@ -214,12 +211,7 @@ jobs:
 
       - name: Determine release tag
         id: tag
-        run: |
-          if [[ "${{ github.ref_name }}" == "stable" ]]; then
-            echo "name=stable" >> $GITHUB_OUTPUT
-          else
-            echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          fi
+        run: echo "name=edge" >> $GITHUB_OUTPUT
 
       - name: Generate pacman repo database
         if: env.nothing_built != 'true'
