@@ -214,6 +214,24 @@ jobs:
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
+      - name: Verify package signatures
+        if: env.nothing_built != 'true'
+        run: |
+          ok=0; fail=0
+          for sig in output/*.pkg.tar.zst.sig; do
+            [[ -f $sig ]] || continue
+            pkg="${sig%.sig}"
+            if gpg --batch --verify "$sig" "$pkg" 2>/dev/null; then
+              echo "OK: $(basename $pkg)"
+              ok=$(( ok + 1 ))
+            else
+              echo "FAIL: $(basename $pkg)"
+              fail=$(( fail + 1 ))
+            fi
+          done
+          echo "Verified: $ok, Failed: $fail"
+          (( fail == 0 ))
+
       - name: Determine release tag
         id: tag
         run: echo "name=edge" >> $GITHUB_OUTPUT
@@ -275,6 +293,7 @@ jobs:
           pkgs=(*.pkg.tar.zst)
           if (( ${#pkgs[@]} > 0 )); then
             repo-add hoopoo.db.tar.gz "${pkgs[@]}"
+            repo-add --files hoopoo.files.tar.gz "${pkgs[@]}"
           fi
           ls -lh
         env:
