@@ -84,27 +84,35 @@ def sync_github(pkgdir, pkgbuild_path, content, watch):
     new_content = re.sub(r'^pkgver=.*$', f'pkgver={latest}', content, flags=re.MULTILINE)
     new_content = re.sub(r'^pkgrel=.*$', 'pkgrel=1', new_content, flags=re.MULTILINE)
 
-    source_match = re.search(r'^source(?:_x86_64)?=\(\s*["\']([^"\']+)["\']', new_content, re.MULTILINE)
-    if source_match:
-        raw_url = source_match.group(1)
-        if '::' in raw_url:
-            raw_url = raw_url.split('::')[1]
-        source_url = raw_url.replace('${pkgver}', latest).replace('$pkgver', latest) \
-                             .replace('${pkgname}', pkgdir).replace('$pkgname', pkgdir)
-        if source_url.startswith('http'):
-            print(f'  Fetching checksum from {source_url}')
-            try:
-                checksum = fetch_checksum(source_url)
-                print(f'  New sha256: {checksum}')
-                new_content = re.sub(
-                    r"^sha256sums=\(.*?\)$",
-                    f"sha256sums=('{checksum}')",
-                    new_content, flags=re.MULTILINE
-                )
-            except Exception as e:
-                print(f'  WARNING: could not fetch checksum ({e}), skipping')
-        else:
-            print(f'  WARNING: could not resolve source URL, skipping checksum update')
+    source_block = re.search(r'^source(?:_x86_64)?=\(([^)]+)\)', new_content, re.MULTILINE | re.DOTALL)
+    if source_block:
+        raw_entries = re.findall(r'["\']([^"\']+)["\']', source_block.group(1))
+        checksums = []
+        all_ok = True
+        for raw_url in raw_entries:
+            if '::' in raw_url:
+                raw_url = raw_url.split('::')[1]
+            source_url = raw_url.replace('${pkgver}', latest).replace('$pkgver', latest) \
+                                 .replace('${pkgname}', pkgdir).replace('$pkgname', pkgdir)
+            if source_url.startswith('http'):
+                print(f'  Fetching checksum from {source_url}')
+                try:
+                    checksum = fetch_checksum(source_url)
+                    print(f'  New sha256: {checksum}')
+                    checksums.append(f"'{checksum}'")
+                except Exception as e:
+                    print(f'  WARNING: could not fetch checksum ({e}), skipping')
+                    all_ok = False
+                    break
+            else:
+                checksums.append("'SKIP'")
+        if all_ok and checksums:
+            new_sums = 'sha256sums=(\n  ' + '\n  '.join(checksums) + '\n)'
+            new_content = re.sub(
+                r"^sha256sums=\(.*?\)",
+                new_sums,
+                new_content, flags=re.MULTILINE | re.DOTALL
+            )
 
     return new_content
 
