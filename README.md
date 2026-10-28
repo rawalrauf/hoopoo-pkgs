@@ -9,7 +9,9 @@ First install the keyring to trust Hoopoo packages:
 ```bash
 sudo pacman-key --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD --keyserver keys.openpgp.org
 sudo pacman-key --lsign-key 070030E5D914817BA797F66AAF1C8F036A5E73FD
-sudo pacman -U https://github.com/rawalrauf/hoopoo-pkgs/releases/download/stable/hoopoo-keyring-1.0.0-1-any.pkg.tar.zst
+KEYRING_URL=$(curl -sL "https://api.github.com/repos/rawalrauf/hoopoo-pkgs/releases/tags/stable" \
+  | python3 -c "import json,sys; print(next(a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if 'hoopoo-keyring' in a['name'] and a['name'].endswith('.pkg.tar.zst')))")
+sudo pacman -U "$KEYRING_URL"
 ```
 
 Then add to `/etc/pacman.conf`:
@@ -80,7 +82,7 @@ Create `pkgbuilds/<pkgname>/PKGBUILD` and optionally `pkgbuilds/<pkgname>/.hoopo
 | python-terminaltexteffects | AUR | Terminal text effects |
 | qmk-hid | AUR | QMK HID for Framework keyboard |
 | spotify | AUR | Spotify music client |
-| tobi-try | [tobi/try](https://github.com/tobi/try) | Toast notifications |
+| tobi-try | [tobi/try](https://github.com/tobi/try) | Shell try-before-you-install tool |
 | ttf-ia-writer | AUR | iA Writer fonts |
 | tuxedo-drivers-nocompatcheck-dkms | AUR | Tuxedo keyboard backlight |
 | typora | AUR | Markdown editor |
@@ -89,7 +91,6 @@ Create `pkgbuilds/<pkgname>/PKGBUILD` and optionally `pkgbuilds/<pkgname>/.hoopo
 | v4l2-relayd | AUR | V4L2 relay daemon |
 | vi | AUR | Classic vi editor |
 | walker | AUR | Wayland app launcher |
-| xdg-terminal-exec | AUR | XDG terminal launcher spec |
 | yaru-*-theme | AUR | Yaru icon/GTK themes |
 | yay | [Jguer/yay](https://github.com/Jguer/yay) | AUR helper |
 | yt6801-dkms | AUR | YT6801 ethernet DKMS driver |
