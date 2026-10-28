@@ -38,9 +38,6 @@ on:
         required: false
         default: 'stable'
         type: string
-    secrets:
-      GITHUB_TOKEN:
-        required: true
 
 jobs:
   copy:

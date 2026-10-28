@@ -49,5 +49,4 @@ jobs:
       packages: ${{ needs.sync.outputs.changed_packages }}
       from: edge
       to: stable
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    secrets: inherit
