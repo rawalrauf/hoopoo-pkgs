@@ -11,6 +11,10 @@ on:
         description: 'Space-separated list of packages to build (empty = all)'
         required: false
 
+concurrency:
+  group: publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
