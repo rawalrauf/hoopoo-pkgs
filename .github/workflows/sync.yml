@@ -35,7 +35,7 @@ jobs:
             echo "has_changes=true" >> $GITHUB_OUTPUT
             git add pkgbuilds/
             git commit -m "chore: sync upstream package versions"
-            git push origin edge
+            git push origin HEAD:refs/heads/edge
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "All packages up to date"
