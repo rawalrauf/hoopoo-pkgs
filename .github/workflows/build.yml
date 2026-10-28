@@ -54,10 +54,15 @@ jobs:
             /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE" 2>/dev/null || true
           fi
 
-          # TODO: Once hoopoo-keyring is published, install it here so builds can
-          # verify GPG-signed sources against the Hoopoo key:
-          #   pacman -U --noconfirm <hoopoo-keyring-url>
-          #   pacman-key --populate hoopoo
+          # Install hoopoo-keyring so builds can verify GPG-signed sources
+          keyring_url=$(curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/stable" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            | python3 -c "import json,sys; assets=[a['browser_download_url'] for a in json.load(sys.stdin).get('assets',[]) if 'hoopoo-keyring' in a['name'] and a['name'].endswith('.pkg.tar.zst')]; print(assets[0] if assets else '')")
+          if [[ -n $keyring_url ]]; then
+            curl -sL "$keyring_url" -o /tmp/hoopoo-keyring.pkg.tar.zst
+            pacman -U --noconfirm /tmp/hoopoo-keyring.pkg.tar.zst || true
+            pacman-key --populate hoopoo || true
+          fi
 
           # Import GPG keys from per-package .hoopoo/package.json
           for f in pkgbuilds/*/.hoopoo/package.json; do

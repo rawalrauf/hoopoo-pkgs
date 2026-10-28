@@ -27,7 +27,6 @@ makedepends=(
   'libtool'
   'pkgconf'
 )
-checkdepends=('linux-omarchy-headers')
 install=intel-ipu7-camera.install
 options=('!strip')
 
