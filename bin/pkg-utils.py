@@ -74,7 +74,7 @@ def copy_packages(packages, src_tag, dst_tag):
         if not name.endswith(".pkg.tar.zst") or "-debug-" in name:
             continue
         base = pkgbase(name)
-        if not any(base == p or base.startswith(p + "-") for p in packages):
+        if base not in packages:
             continue
         to_copy.append((name, url))
         print(f"COPY: {name}")
@@ -86,6 +86,16 @@ def copy_packages(packages, src_tag, dst_tag):
     if not to_copy:
         print("No matching packages found in source release — nothing to copy.")
         return
+
+    ensure_release(dst_tag)
+
+    for name in to_replace:
+        print(f"Deleting old {name} from {dst_tag}")
+        gh("release", "delete-asset", dst_tag, name, "--repo", REPO, "--yes")
+        gh("release", "delete-asset", dst_tag, name + ".sig", "--repo", REPO, "--yes")
+
+    dst = get_release(dst_tag)
+    dst_assets = {a["name"]: a for a in dst.get("assets", [])}
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for name, url in to_copy:
@@ -113,13 +123,6 @@ def copy_packages(packages, src_tag, dst_tag):
         pkgs_for_db = [f for f in os.listdir(tmpdir) if f.endswith(".pkg.tar.zst")]
         if pkgs_for_db:
             subprocess.run(["repo-add", "hoopoo.db.tar.gz"] + pkgs_for_db, cwd=tmpdir, check=True)
-
-        ensure_release(dst_tag)
-
-        for name in to_replace:
-            print(f"Deleting old {name} from {dst_tag}")
-            gh("release", "delete-asset", dst_tag, name, "--repo", REPO, "--yes")
-            gh("release", "delete-asset", dst_tag, name + ".sig", "--repo", REPO, "--yes")
 
         for asset in ["hoopoo.db.tar.gz", "hoopoo.db", "hoopoo.files.tar.gz", "hoopoo.files"]:
             gh("release", "delete-asset", dst_tag, asset, "--repo", REPO, "--yes")
