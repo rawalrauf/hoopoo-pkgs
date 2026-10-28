@@ -2,7 +2,7 @@ name: Publish
 
 on:
   push:
-    branches: [stable, edge]
+    branches: [edge]
     paths:
       - 'pkgbuilds/**'
   workflow_dispatch:
@@ -296,6 +296,14 @@ jobs:
               --repo "${{ github.repository }}" --yes 2>/dev/null || true
           done < /tmp/remove.txt
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote old edge versions to stable
+        if: env.nothing_built != 'true'
+        run: |
+          python3 bin/promote-to-stable.py /tmp/remove.txt /tmp/existing-release.json
+        env:
+          REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure release exists
