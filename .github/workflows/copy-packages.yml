@@ -22,6 +22,25 @@ on:
         options:
           - stable
           - edge
+  workflow_call:
+    inputs:
+      packages:
+        description: 'Space-separated list of packages to copy'
+        required: true
+        type: string
+      from:
+        description: 'Source release tag'
+        required: false
+        default: 'edge'
+        type: string
+      to:
+        description: 'Destination release tag'
+        required: false
+        default: 'stable'
+        type: string
+    secrets:
+      GITHUB_TOKEN:
+        required: true
 
 jobs:
   copy:
@@ -39,10 +58,12 @@ jobs:
 
       - name: Fetch source and destination release metadata
         run: |
-          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.from }}" \
+          FROM="${{ inputs.from }}"
+          TO="${{ inputs.to }}"
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$FROM" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/src-release.json
-          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ github.event.inputs.to }}" \
+          curl -sL "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TO" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -o /tmp/dst-release.json
         env:
@@ -95,17 +116,35 @@ jobs:
             print(f"\nTotal to copy: {len(to_copy)}, replacing: {len(to_replace)}")
           EOF
         env:
-          PACKAGES: ${{ github.event.inputs.packages }}
+          PACKAGES: ${{ inputs.packages }}
 
       - name: Download packages from source
         if: env.nothing_to_copy != 'true'
         run: |
           mkdir -p /tmp/copy-output
-          while IFS='|' read -r name url; do
-            [[ -z $name ]] && continue
-            echo "Downloading $name"
-            curl -sL "$url" -o "/tmp/copy-output/$name"
-          done < /tmp/copy-list.txt
+          python3 << 'EOF'
+          import json, subprocess
+
+          src = json.load(open('/tmp/src-release.json'))
+          src_assets = {a['name']: a['browser_download_url'] for a in src.get('assets', [])}
+          import os, subprocess
+          token = os.environ['GITHUB_TOKEN']
+
+          with open('/tmp/copy-list.txt') as f:
+            lines = [l.strip() for l in f if l.strip()]
+
+          for line in lines:
+            name, url = line.split('|', 1)
+            dest = f'/tmp/copy-output/{name}'
+            print(f'Downloading {name}')
+            subprocess.run(['curl', '-sL', '-H', f'Authorization: Bearer {token}', url, '-o', dest], check=True)
+            sig = name + '.sig'
+            if sig in src_assets:
+              print(f'Downloading {sig}')
+              subprocess.run(['curl', '-sL', '-H', f'Authorization: Bearer {token}', src_assets[sig], '-o', f'/tmp/copy-output/{sig}'], check=True)
+          EOF
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate updated destination database
         if: env.nothing_to_copy != 'true'
@@ -167,11 +206,11 @@ jobs:
       - name: Ensure destination release exists
         if: env.nothing_to_copy != 'true'
         run: |
-          gh release view "${{ github.event.inputs.to }}" \
+          gh release view "${{ inputs.to }}" \
             --repo "${{ github.repository }}" > /dev/null 2>&1 || \
-          gh release create "${{ github.event.inputs.to }}" \
+          gh release create "${{ inputs.to }}" \
             --repo "${{ github.repository }}" \
-            --title "${{ github.event.inputs.to }}" \
+            --title "${{ inputs.to }}" \
             --notes "Automated release" \
             --latest=false
         env:
@@ -180,7 +219,7 @@ jobs:
       - name: Delete old versions from destination and upload new
         if: env.nothing_to_copy != 'true'
         run: |
-          DST="${{ github.event.inputs.to }}"
+          DST="${{ inputs.to }}"
 
           # Delete old versions being replaced
           while read -r name; do
@@ -198,7 +237,7 @@ jobs:
 
           cd /tmp/copy-output
           files_to_upload=""
-          for f in *.pkg.tar.zst hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
+          for f in *.pkg.tar.zst *.pkg.tar.zst.sig hoopoo.db.tar.gz hoopoo.db hoopoo.files.tar.gz hoopoo.files; do
             [[ -f $f ]] && files_to_upload="$files_to_upload $f"
           done
           [[ -n ${files_to_upload// /} ]] && gh release upload "$DST" $files_to_upload \

@@ -11,6 +11,9 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    outputs:
+      changed_packages: ${{ steps.sync.outputs.changed_packages }}
+      has_changes: ${{ steps.sync.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,6 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check and update package versions
+        id: sync
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -26,9 +30,24 @@ jobs:
           git config user.email "bot@hoopoo"
           python3 bin/sync-upstream.py
           if ! git diff --quiet pkgbuilds/; then
+            changed=$(git diff --name-only pkgbuilds/ | cut -d/ -f2 | sort -u | tr '\n' ' ' | xargs)
+            echo "changed_packages=$changed" >> $GITHUB_OUTPUT
+            echo "has_changes=true" >> $GITHUB_OUTPUT
             git add pkgbuilds/
             git commit -m "chore: sync upstream package versions"
             git push origin edge
           else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "All packages up to date"
           fi
+
+  promote:
+    needs: sync
+    if: needs.sync.outputs.has_changes == 'true'
+    uses: ./.github/workflows/copy-packages.yml
+    with:
+      packages: ${{ needs.sync.outputs.changed_packages }}
+      from: edge
+      to: stable
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
