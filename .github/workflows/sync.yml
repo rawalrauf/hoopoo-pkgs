@@ -11,17 +11,15 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    container:
-      image: archlinux/archlinux:latest
+    outputs:
+      changed_packages: ${{ steps.sync.outputs.changed_packages }}
+      has_changes: ${{ steps.sync.outputs.has_changes }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: edge
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-
-      - name: Setup tools
-        run: pacman -Sy --noconfirm git python github-cli curl pacman
 
       - name: Check and update package versions
         id: sync
@@ -40,22 +38,42 @@ jobs:
             echo "All packages up to date"
           fi
 
-      - name: Copy current edge versions to stable before building new ones
-        if: steps.sync.outputs.has_changes == 'true'
+  promote:
+    needs: sync
+    if: needs.sync.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    permissions:
+      contents: write
+    steps:
+      - name: Install git
+        run: pacman -Sy --noconfirm git
+
+      - uses: actions/checkout@v4
+        with:
+          ref: edge
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup tools
+        run: pacman -S --noconfirm --needed python github-cli curl pacman
+
+      - name: Copy current edge versions to stable
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           python3 bin/pkg-utils.py \
-            --packages "${{ steps.sync.outputs.changed_packages }}" \
+            --packages "${{ needs.sync.outputs.changed_packages }}" \
             --from edge \
             --to stable
 
       - name: Commit updated PKGBUILDs to edge
-        if: steps.sync.outputs.has_changes == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config user.name "hoopoo-bot"
+          git config user.email "bot@hoopoo"
           git add pkgbuilds/
           git commit -m "chore: sync upstream package versions"
           git push origin HEAD:refs/heads/edge
