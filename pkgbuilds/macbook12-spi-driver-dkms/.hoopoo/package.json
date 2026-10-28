@@ -1,0 +1,8 @@
+{
+  "source": "local",
+  "upstream": {
+    "watch": {
+      "aur": "macbook12-spi-driver-dkms"
+    }
+  }
+}
