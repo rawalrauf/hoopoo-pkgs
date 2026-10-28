@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-import json, re, sys, subprocess, os, urllib.request, hashlib, tempfile
-from functools import cmp_to_key
+import json, re, sys, os, urllib.request, hashlib
 
 github_token = os.environ.get('GITHUB_TOKEN', '')
 
@@ -26,42 +25,39 @@ def vercmp(a, b):
         return r
     return int(ra or 0) - int(rb or 0)
 
-def github_get(url):
-    req = urllib.request.Request(url)
+def http_get(url, headers=None):
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read()
+
+def github_get_json(url):
+    headers = {}
     if github_token:
-        req.add_header('Authorization', f'Bearer {github_token}')
-    with urllib.request.urlopen(req) as r:
-        return json.load(r)
+        headers['Authorization'] = f'Bearer {github_token}'
+    return json.loads(http_get(url, headers))
 
-updated = []
+def fetch_checksum(url):
+    req = urllib.request.Request(url)
+    sha = hashlib.sha256()
+    with urllib.request.urlopen(req, timeout=60) as r:
+        while chunk := r.read(65536):
+            sha.update(chunk)
+    return sha.hexdigest()
 
-for pkgdir in sorted(os.listdir('pkgbuilds')):
-    pkgjson = f'pkgbuilds/{pkgdir}/.hoopoo/package.json'
-    pkgbuild = f'pkgbuilds/{pkgdir}/PKGBUILD'
-
-    if not os.path.isfile(pkgjson) or not os.path.isfile(pkgbuild):
-        continue
-
-    with open(pkgjson) as f:
-        meta = json.load(f)
-
-    watch = meta.get('upstream', {}).get('watch', {})
+def sync_github(pkgdir, pkgbuild_path, content, watch):
     repo = watch.get('github', '')
-    if not repo:
-        continue
-
     pattern = watch.get('pattern', '')
 
     try:
-        release = github_get(f'https://api.github.com/repos/{repo}/releases/latest')
+        release = github_get_json(f'https://api.github.com/repos/{repo}/releases/latest')
     except Exception as e:
         print(f'  SKIP {pkgdir}: failed to fetch release ({e})')
-        continue
+        return None
 
     tag = release.get('tag_name', '')
     if not tag:
         print(f'  SKIP {pkgdir}: no tag_name in release')
-        continue
+        return None
 
     if pattern:
         m = re.search(pattern, tag)
@@ -71,59 +67,34 @@ for pkgdir in sorted(os.listdir('pkgbuilds')):
 
     if not latest:
         print(f'  SKIP {pkgdir}: could not parse version from tag {tag}')
-        continue
-
-    with open(pkgbuild) as f:
-        content = f.read()
+        return None
 
     current_match = re.search(r'^pkgver=(.+)$', content, re.MULTILINE)
     if not current_match:
         print(f'  SKIP {pkgdir}: no pkgver found')
-        continue
+        return None
     current = current_match.group(1).strip()
 
-    cmp = vercmp(latest, current)
-    if cmp <= 0:
+    if vercmp(latest, current) <= 0:
         print(f'  OK {pkgdir}: {current} is current')
-        continue
+        return None
 
     print(f'  UPDATE {pkgdir}: {current} -> {latest} (tag: {tag})')
 
     new_content = re.sub(r'^pkgver=.*$', f'pkgver={latest}', content, flags=re.MULTILINE)
     new_content = re.sub(r'^pkgrel=.*$', 'pkgrel=1', new_content, flags=re.MULTILINE)
 
-    source_match = re.search(r'^source(?:_x86_64)?=\(["\']([^"\']+)["\']', new_content, re.MULTILINE)
+    source_match = re.search(r'^source(?:_x86_64)?=\(\s*["\']([^"\']+)["\']', new_content, re.MULTILINE)
     if source_match:
         raw_url = source_match.group(1)
         if '::' in raw_url:
             raw_url = raw_url.split('::')[1]
-        env = os.environ.copy()
-        env['pkgver'] = latest
-        env['pkgname'] = pkgdir
-        try:
-            source_url = subprocess.run(
-                ['bash', '-c', f'pkgver={latest} pkgname={pkgdir} echo "{raw_url}"'],
-                capture_output=True, text=True, env=env
-            ).stdout.strip()
-            if not source_url.startswith('http'):
-                source_url = subprocess.run(
-                    ['bash', '-c', f'pkgver="{latest}"; pkgname="{pkgdir}"; echo "{raw_url}"'],
-                    capture_output=True, text=True
-                ).stdout.strip()
-        except Exception:
-            source_url = ''
-
+        source_url = raw_url.replace('${pkgver}', latest).replace('$pkgver', latest) \
+                             .replace('${pkgname}', pkgdir).replace('$pkgname', pkgdir)
         if source_url.startswith('http'):
             print(f'  Fetching checksum from {source_url}')
             try:
-                with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                    tmppath = tmp.name
-                req = urllib.request.Request(source_url)
-                with urllib.request.urlopen(req, timeout=60) as r:
-                    sha = hashlib.sha256()
-                    while chunk := r.read(65536):
-                        sha.update(chunk)
-                checksum = sha.hexdigest()
+                checksum = fetch_checksum(source_url)
                 print(f'  New sha256: {checksum}')
                 new_content = re.sub(
                     r"^sha256sums=\(.*?\)$",
@@ -131,18 +102,84 @@ for pkgdir in sorted(os.listdir('pkgbuilds')):
                     new_content, flags=re.MULTILINE
                 )
             except Exception as e:
-                print(f'  WARNING: could not fetch source for checksum ({e}), skipping checksum update')
+                print(f'  WARNING: could not fetch checksum ({e}), skipping')
         else:
             print(f'  WARNING: could not resolve source URL, skipping checksum update')
 
-    with open(pkgbuild, 'w') as f:
-        f.write(new_content)
+    return new_content
 
-    updated.append(pkgdir)
+def sync_aur(pkgdir, pkgbuild_path, content, watch):
+    aur_pkg = watch.get('aur', pkgdir)
+
+    try:
+        info = github_get_json(f'https://aur.archlinux.org/rpc/v5/info/{aur_pkg}')
+    except Exception as e:
+        print(f'  SKIP {pkgdir}: AUR RPC failed ({e})')
+        return None
+
+    results = info.get('results', [])
+    if not results:
+        print(f'  SKIP {pkgdir}: not found on AUR')
+        return None
+
+    aur_version = results[0].get('Version', '')
+    latest = re.sub(r'-\d+$', '', aur_version)
+
+    current_match = re.search(r'^pkgver=(.+)$', content, re.MULTILINE)
+    if not current_match:
+        print(f'  SKIP {pkgdir}: no pkgver found')
+        return None
+    current = current_match.group(1).strip()
+
+    if vercmp(latest, current) <= 0:
+        print(f'  OK {pkgdir}: {current} is current')
+        return None
+
+    print(f'  UPDATE {pkgdir}: {current} -> {latest} (AUR: {aur_version})')
+
+    try:
+        new_content = http_get(f'https://aur.archlinux.org/cgit/aur.git/plain/PKGBUILD?h={aur_pkg}').decode()
+        print(f'  Pulled fresh PKGBUILD from AUR')
+        return new_content
+    except Exception as e:
+        print(f'  WARNING: could not fetch AUR PKGBUILD ({e}), skipping')
+        return None
+
+updated = []
+
+for pkgdir in sorted(os.listdir('pkgbuilds')):
+    pkgjson = f'pkgbuilds/{pkgdir}/.hoopoo/package.json'
+    pkgbuild_path = f'pkgbuilds/{pkgdir}/PKGBUILD'
+
+    if not os.path.isfile(pkgjson) or not os.path.isfile(pkgbuild_path):
+        continue
+
+    with open(pkgjson) as f:
+        meta = json.load(f)
+
+    watch = meta.get('upstream', {}).get('watch', {})
+    if not watch:
+        continue
+
+    with open(pkgbuild_path) as f:
+        content = f.read()
+
+    new_content = None
+
+    if 'github' in watch:
+        new_content = sync_github(pkgdir, pkgbuild_path, content, watch)
+    elif 'aur' in watch:
+        new_content = sync_aur(pkgdir, pkgbuild_path, content, watch)
+    else:
+        print(f'  SKIP {pkgdir}: unknown watch type')
+        continue
+
+    if new_content is not None:
+        with open(pkgbuild_path, 'w') as f:
+            f.write(new_content)
+        updated.append(pkgdir)
 
 if updated:
     print(f'\nUpdated: {", ".join(updated)}')
-    sys.exit(0)
 else:
     print('\nAll packages up to date')
-    sys.exit(0)
