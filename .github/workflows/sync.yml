@@ -29,87 +29,8 @@ jobs:
         run: |
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
-
-          updated=false
-
-          for dir in pkgbuilds/*/; do
-            pkg=$(basename "$dir")
-            pkgjson="$dir/.hoopoo/package.json"
-            pkgbuild="$dir/PKGBUILD"
-
-            [[ -f $pkgjson && -f $pkgbuild ]] || continue
-
-            repo=$(python3 -c "
-import json, sys
-d = json.load(open(sys.argv[1]))
-print(d.get('upstream', {}).get('watch', {}).get('github', ''))
-" "$pkgjson" 2>/dev/null)
-            [[ -z $repo ]] && continue
-
-            pattern=$(python3 -c "
-import json, sys
-d = json.load(open(sys.argv[1]))
-print(d.get('upstream', {}).get('watch', {}).get('pattern', ''))
-" "$pkgjson" 2>/dev/null)
-
-            release_json=$(curl -s "https://api.github.com/repos/$repo/releases/latest" \
-              -H "Authorization: Bearer $GITHUB_TOKEN")
-
-            tag=$(echo "$release_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null)
-            [[ -z $tag ]] && continue
-
-            if [[ -n $pattern ]]; then
-              latest=$(python3 -c "
-import re, sys
-tag = sys.argv[1]
-pattern = sys.argv[2]
-m = re.search(pattern, tag)
-print(m.group('version') if m else '')
-" "$tag" "$pattern" 2>/dev/null)
-            else
-              latest="${tag#v}"
-            fi
-            [[ -z $latest ]] && continue
-
-            current=$(bash -c "source $pkgbuild 2>/dev/null; echo \$pkgver" 2>/dev/null | tail -1)
-            [[ -z $current ]] && continue
-
-            cmp=$(vercmp "$latest" "$current" 2>/dev/null || echo "0")
-            (( cmp <= 0 )) && continue
-
-            echo "==> Updating $pkg: $current -> $latest (tag: $tag)"
-
-            source_url=$(bash -c "
-pkgver=$latest
-source $pkgbuild 2>/dev/null
-arr=(\"\${source[@]}\")
-echo \"\${arr[0]##*::}\"
-" 2>/dev/null | tail -1)
-
-            if [[ -n $source_url && $source_url == http* ]]; then
-              echo "  Fetching $source_url"
-              tmpfile=$(mktemp /tmp/hoopoo-sync-XXXXXX)
-              if curl -fsSL "$source_url" -o "$tmpfile" 2>/dev/null; then
-                checksum=$(sha256sum "$tmpfile" | awk '{print $1}')
-                rm -f "$tmpfile"
-                echo "  New sha256: $checksum"
-                sed -i "s/^pkgver=.*/pkgver=$latest/" "$pkgbuild"
-                sed -i "s/^pkgrel=.*/pkgrel=1/" "$pkgbuild"
-                sed -i "s/^sha256sums=.*/sha256sums=('$checksum')/" "$pkgbuild"
-                updated=true
-              else
-                rm -f "$tmpfile"
-                echo "  WARNING: Failed to fetch source for $pkg, skipping checksum update"
-                sed -i "s/^pkgver=.*/pkgver=$latest/" "$pkgbuild"
-                sed -i "s/^pkgrel=.*/pkgrel=1/" "$pkgbuild"
-                updated=true
-              fi
-            else
-              echo "  WARNING: Could not resolve source URL for $pkg, skipping"
-            fi
-          done
-
-          if [[ $updated == true ]]; then
+          python3 bin/sync-upstream.py
+          if ! git diff --quiet pkgbuilds/; then
             git add pkgbuilds/
             git commit -m "chore: sync upstream package versions"
             git push origin edge
