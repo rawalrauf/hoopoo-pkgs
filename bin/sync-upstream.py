@@ -1,7 +1,30 @@
 #!/usr/bin/env python3
 import json, re, sys, subprocess, os, urllib.request, hashlib, tempfile
+from functools import cmp_to_key
 
 github_token = os.environ.get('GITHUB_TOKEN', '')
+
+def vercmp(a, b):
+    def split(v):
+        return re.findall(r'[0-9]+|[a-zA-Z]+', v)
+    def cmp_parts(pa, pb):
+        for x, y in zip(pa, pb):
+            if x.isdigit() and y.isdigit():
+                r = int(x) - int(y)
+            else:
+                r = (x > y) - (x < y)
+            if r != 0:
+                return r
+        return len(pa) - len(pb)
+    ea, va, ra = re.match(r'^(?:(\d+):)?([^-]+?)(?:-(\d+))?$', a or '0').groups()
+    eb, vb, rb = re.match(r'^(?:(\d+):)?([^-]+?)(?:-(\d+))?$', b or '0').groups()
+    ea, eb = int(ea or 0), int(eb or 0)
+    if ea != eb:
+        return ea - eb
+    r = cmp_parts(split(va or ''), split(vb or ''))
+    if r != 0:
+        return r
+    return int(ra or 0) - int(rb or 0)
 
 def github_get(url):
     req = urllib.request.Request(url)
@@ -59,8 +82,7 @@ for pkgdir in sorted(os.listdir('pkgbuilds')):
         continue
     current = current_match.group(1).strip()
 
-    result = subprocess.run(['vercmp', latest, current], capture_output=True, text=True)
-    cmp = int(result.stdout.strip()) if result.returncode == 0 else 0
+    cmp = vercmp(latest, current)
     if cmp <= 0:
         print(f'  OK {pkgdir}: {current} is current')
         continue
