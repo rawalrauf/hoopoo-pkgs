@@ -75,13 +75,13 @@ function M.setup()
         vim.fn.system(cmd, lines)
       end
 
-      if vim.g.omarchy_remote_clipboard_osc52 ~= false then
+      if vim.g.hoopoo_remote_clipboard_osc52 ~= false then
         if has_tmux and register == "+" then
           -- tmux ignores zero-byte loads. Record the current buffer's identity
           -- instead: all Neovim instances see empty until a new buffer arrives,
           -- without deleting the user's shared tmux clipboard history.
           if #lines == 0 or (#lines == 1 and lines[1] == "") then
-            vim.fn.system({ "tmux", "set-option", "-sF", "@omarchy-nvim-cleared-buffer", "#{buffer_name}" })
+            vim.fn.system({ "tmux", "set-option", "-sF", "@hoopoo-nvim-cleared-buffer", "#{buffer_name}" })
             return
           end
           -- Let tmux emit OSC 52, avoiding its input parser's payload size limit.
@@ -107,9 +107,9 @@ function M.setup()
       -- tmux's buffer is shared between Neovim instances on the server. Over
       -- SSH, prefer it to the remote machine's unrelated graphical clipboard.
       if has_tmux and register == "+" and (in_ssh or not has_wayland)
-        and vim.g.omarchy_remote_clipboard_osc52 ~= false then
+        and vim.g.hoopoo_remote_clipboard_osc52 ~= false then
         local buffers = vim.fn.systemlist({ "tmux", "display-message", "-p",
-          "#{buffer_name}\n#{@omarchy-nvim-cleared-buffer}" })
+          "#{buffer_name}\n#{@hoopoo-nvim-cleared-buffer}" })
         if vim.v.shell_error ~= 0 then
           return vim.deepcopy(last_copy[register] or { {}, "v" })
         end
@@ -142,7 +142,7 @@ function M.setup()
   end
 
   vim.g.clipboard = {
-    name = "OmarchyRemoteClipboard",
+    name = "HoopooRemoteClipboard",
     copy = { ["+"] = copy("+"), ["*"] = copy("*") },
     paste = { ["+"] = paste("+"), ["*"] = paste("*") },
     cache_enabled = 0,
@@ -150,7 +150,7 @@ function M.setup()
 
   -- LazyVim clears this over SSH. Users can opt out before setup or override
   -- the option afterward in config/options.lua.
-  if vim.g.omarchy_remote_clipboard_sync ~= false then
+  if vim.g.hoopoo_remote_clipboard_sync ~= false then
     vim.opt.clipboard:append("unnamedplus")
   end
 end

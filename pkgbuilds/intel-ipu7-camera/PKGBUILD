@@ -38,7 +38,7 @@ _icamerasrc_commit="4fb31db76b618aae72184c59314b839dedb42689"
 
 # Linux 7.2 moved the Intel CVS (Computer Vision Sensing) controller into the
 # IPU media graph, so the sensor only appears once drivers/media/i2c/cvs is
-# loaded. linux-omarchy builds that driver in-tree, signed and carrying the
+# loaded. linux-hoopoo builds that driver in-tree, signed and carrying the
 # XPS 14 speaker-ID wake-IRQ fix, and camera-init loads it. Kernels before 7.2
 # use the legacy misc driver from vision-drivers instead.
 #
@@ -202,11 +202,11 @@ check() {
     "${srcdir}/check-userptr-range.c" -o "${srcdir}/check-userptr-range" || return 1
   "${srcdir}/check-userptr-range" || return 1
 
-  kernel_files=$(pacman -Qql linux-omarchy-headers) || return 1
+  kernel_files=$(pacman -Qql linux-headers) || return 1
   kernel_build="$(sed -n \
     '\#/build/Makefile$# { s#/Makefile$##; s#^#/#; p; q; }' <<<"$kernel_files")" || return 1
   if [[ ! -f "${kernel_build}/Makefile" ]]; then
-    printf 'Unable to locate the linux-omarchy-headers build tree\n' >&2
+    printf 'Unable to locate the linux-headers build tree\n' >&2
     return 1
   fi
 

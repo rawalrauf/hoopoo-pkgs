@@ -96,7 +96,7 @@ package() {
 # - mkinitcpio's own kernel hook, which Limine's takes over by name, runs from
 #   a copy of mkinitcpio 42's (mkinitcpio-install.hook: keep its triggers in
 #   step with mkinitcpio's), just before Limine's;
-# - Limine's EFI deploy hook stays out: omarchy-mac-boot puts Limine in
+# - Limine's EFI deploy hook stays out: hoopoo-mac-boot puts Limine in
 #   U-Boot's EFI/BOOT/BOOTAA64.EFI slot;
 # - the wrapper is plain mkinitcpio: it would run limine-mkinitcpio after
 #   every preset build, mkinitcpio's kernel hook included.

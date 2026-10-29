@@ -1,4 +1,4 @@
-# Maintainer: Ryan Hughes <ryan@omarchy.org>
+# Maintainer: Rawal Rauf <rawalrauf@hoopoo.dev>
 pkgname=hoopoo-nvim
 pkgver=2026.9.21
 pkgrel=8
@@ -8,8 +8,7 @@ url="https://github.com/LazyVim/LazyVim"
 license=('MIT')
 depends=('neovim>=0.9.0' 'git')
 makedepends=('git' 'nodejs' 'npm' 'tree-sitter-cli')
-conflicts=('omarchy-lazyvim' 'omarchy-nvim')
-provides=('omarchy-nvim')
+conflicts=('hoopoo-lazyvim')
 options=('!debug')
 source=("https://github.com/LazyVim/starter/archive/refs/heads/main.tar.gz")
 sha256sums=('d865d50211358358d3c3c1e356773c1e3de1e8964215d85eb1b4c77521e17488')
@@ -124,18 +123,18 @@ package() {
   # from /etc/skel do not need a first-login hoopoo-nvim-setup cleanup pass.
   restore_lazy_worktrees "$pkgdir/usr/share/$pkgname/data"
 
-  # Seed new users via /etc/skel. The installer installs omarchy-nvim before
+  # Seed new users via /etc/skel. The installer installs hoopoo-nvim before
   # creating the first user, so this handles initial ISO installs and future
   # users without an extra overwrite step.
   install -dm755 "$pkgdir/etc/skel/.config" "$pkgdir/etc/skel/.local/share"
   cp -a "$pkgdir/usr/share/$pkgname/config" "$pkgdir/etc/skel/.config/nvim"
   cp -a "$pkgdir/usr/share/$pkgname/data" "$pkgdir/etc/skel/.local/share/nvim"
-  ln -snf "../../../../.local/state/hoopoo/current/theme/neovim.lua" \
+  ln -snf "../../../../.config/hoopoo/current/theme/neovim.lua" \
     "$pkgdir/etc/skel/.config/nvim/lua/plugins/theme.lua"
 
   # Ship the plugin cache once, now that /etc/skel has its copy. Keeping a
-  # second one under /usr/share made omarchy-nvim the largest package in an
-  # Omarchy install after noto-fonts-cjk — ~116 MiB installed, ~88 MB of it read
+  # second one under /usr/share made hoopoo-nvim the largest package in a
+  # Hoopoo install after noto-fonts-cjk — ~116 MiB installed, ~88 MB of it read
   # off the ISO on every install. config/ stays: migrations read it from there.
   rm -rf "$pkgdir/usr/share/$pkgname/data"
 
