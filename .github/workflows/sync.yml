@@ -26,8 +26,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "hoopoo-bot"
-          git config user.email "bot@hoopoo"
           python3 bin/sync-upstream.py
           if ! git diff --quiet pkgbuilds/; then
             changed=$(git diff --name-only pkgbuilds/ | cut -d/ -f2 | sort -u | tr '\n' ' ' | xargs)
@@ -68,14 +66,26 @@ jobs:
             --from edge \
             --to stable
 
+  commit:
+    needs: [sync, promote]
+    if: needs.sync.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: edge
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
       - name: Commit updated PKGBUILDs to edge
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global --add safe.directory /__w/hoopoo-pkgs/hoopoo-pkgs
-          cd /__w/hoopoo-pkgs/hoopoo-pkgs
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
+          python3 bin/sync-upstream.py
           git add pkgbuilds/
           git commit -m "chore: sync upstream package versions"
           git push origin HEAD:refs/heads/edge
