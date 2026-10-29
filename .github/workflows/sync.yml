@@ -71,8 +71,8 @@ jobs:
       - name: Commit updated PKGBUILDs to edge
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: /__w/hoopoo-pkgs/hoopoo-pkgs
         run: |
+          cd /__w/hoopoo-pkgs/hoopoo-pkgs
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
           git add pkgbuilds/
