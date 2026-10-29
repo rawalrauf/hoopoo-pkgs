@@ -84,6 +84,21 @@ def sync_github(pkgdir, pkgbuild_path, content, watch):
     new_content = re.sub(r'^pkgver=.*$', f'pkgver={latest}', content, flags=re.MULTILINE)
     new_content = re.sub(r'^pkgrel=.*$', 'pkgrel=1', new_content, flags=re.MULTILINE)
 
+    vars = {'pkgver': latest, 'pkgname': pkgdir}
+    for m in re.finditer(r'^(\w+)=["\']?([^"\'"\n]+)["\']?$', new_content, re.MULTILINE):
+        vars[m.group(1)] = m.group(2).strip()
+
+    def expand(s):
+        for _ in range(5):
+            expanded = re.sub(r'\$\{(\w+)\}|\$(\w+)', lambda m: vars.get(m.group(1) or m.group(2), m.group(0)), s)
+            if expanded == s:
+                break
+            s = expanded
+        return s
+
+    for k in list(vars):
+        vars[k] = expand(vars[k])
+
     source_block = re.search(r'^source(?:_x86_64)?=\(([^)]+)\)', new_content, re.MULTILINE | re.DOTALL)
     if source_block:
         raw_entries = re.findall(r'["\']([^"\']+)["\']', source_block.group(1))
@@ -92,8 +107,7 @@ def sync_github(pkgdir, pkgbuild_path, content, watch):
         for raw_url in raw_entries:
             if '::' in raw_url:
                 raw_url = raw_url.split('::')[1]
-            source_url = raw_url.replace('${pkgver}', latest).replace('$pkgver', latest) \
-                                 .replace('${pkgname}', pkgdir).replace('$pkgname', pkgdir)
+            source_url = expand(raw_url)
             if source_url.startswith('http'):
                 print(f'  Fetching checksum from {source_url}')
                 try:

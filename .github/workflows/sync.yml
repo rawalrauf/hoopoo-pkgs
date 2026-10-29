@@ -18,19 +18,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: edge
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BOT_PAT }}
           fetch-depth: 0
 
-      - name: Check and update package versions
+      - name: Fetch, update and commit package versions
         id: sync
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config user.name "hoopoo-bot"
+          git config user.email "bot@hoopoo"
           python3 bin/sync-upstream.py
           if ! git diff --quiet pkgbuilds/; then
-            changed=$(git diff --name-only pkgbuilds/ | cut -d/ -f2 | sort -u | tr '\n' ' ' | xargs)
-            echo "changed_packages=$changed" >> $GITHUB_OUTPUT
+            changed=$(git diff --name-only pkgbuilds/ | cut -d/ -f2 | sort -u)
+            echo "changed_packages=$(echo "$changed" | tr '\n' ' ' | xargs)" >> $GITHUB_OUTPUT
             echo "has_changes=true" >> $GITHUB_OUTPUT
+            for pkg in $changed; do
+              git add pkgbuilds/$pkg/
+              git commit -m "pkg($pkg): sync upstream version"
+            done
+            git push origin HEAD:refs/heads/edge
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "All packages up to date"
@@ -66,26 +73,16 @@ jobs:
             --from edge \
             --to stable
 
-  commit:
+  build:
     needs: [sync, promote]
     if: needs.sync.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: edge
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
-
-      - name: Commit updated PKGBUILDs to edge
+      - name: Trigger build workflow
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
         run: |
-          git config user.name "hoopoo-bot"
-          git config user.email "bot@hoopoo"
-          python3 bin/sync-upstream.py
-          git add pkgbuilds/
-          git commit -m "chore: sync upstream package versions"
-          git push origin HEAD:refs/heads/edge
+          gh workflow run build.yml \
+            --repo ${{ github.repository }} \
+            --ref edge \
+            --field packages="${{ needs.sync.outputs.changed_packages }}"
