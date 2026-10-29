@@ -72,6 +72,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config --global --add safe.directory /__w/hoopoo-pkgs/hoopoo-pkgs
           cd /__w/hoopoo-pkgs/hoopoo-pkgs
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
