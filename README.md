@@ -7,7 +7,7 @@ Personal pacman repository for [Hoopoo](https://github.com/rawalrauf/omarchy) â€
 First install the keyring to trust Hoopoo packages:
 
 ```bash
-sudo pacman-key --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD --keyserver keys.openpgp.org
+sudo pacman-key --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD --keyserver keyserver.ubuntu.com
 sudo pacman-key --lsign-key 070030E5D914817BA797F66AAF1C8F036A5E73FD
 KEYRING_URL=$(curl -sL "https://api.github.com/repos/rawalrauf/hoopoo-pkgs/releases/tags/stable" \
   | python3 -c "import json,sys; print(next(a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if 'hoopoo-keyring' in a['name'] and a['name'].endswith('.pkg.tar.zst')))")
