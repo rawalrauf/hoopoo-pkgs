@@ -1,7 +1,7 @@
 # Maintainer: Rawal Rauf <rawalrauf@hoopoo.dev>
 pkgname=hoopoo-nvim
 pkgver=2026.9.21
-pkgrel=8
+pkgrel=9
 pkgdesc="Pre-built LazyVim configuration with cached plugins"
 arch=('any')
 url="https://github.com/LazyVim/LazyVim"
