@@ -61,7 +61,8 @@ jobs:
           if [[ -n $keyring_url ]]; then
             curl -sL "$keyring_url" -o /tmp/hoopoo-keyring.pkg.tar.zst
             pacman -U --noconfirm /tmp/hoopoo-keyring.pkg.tar.zst || true
-            pacman-key --populate hoopoo || true
+            pacman-key --init
+            pacman-key --populate hoopoo
           fi
 
           # Import GPG keys from per-package .hoopoo/package.json
