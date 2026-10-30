@@ -1,0 +1,8 @@
+{
+  "source": "aur",
+  "upstream": {
+    "watch": {
+      "aur": "google-chrome"
+    }
+  }
+}
