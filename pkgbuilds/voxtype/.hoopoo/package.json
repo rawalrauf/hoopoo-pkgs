@@ -1,0 +1,12 @@
+{
+  "source": "aur",
+  "upstream": {
+    "watch": {
+      "aur": "voxtype"
+    }
+  },
+  "gpg_keys": [
+    "E79F5BAF8CD51A806AA27DBB7DA2709247D75BC6",
+    "9CCF7915B750CAE8B095ED1AA3FC9F33FD209279"
+  ]
+}
