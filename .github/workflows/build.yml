@@ -293,7 +293,6 @@ jobs:
           pkgs=(*.pkg.tar.zst)
           if (( ${#pkgs[@]} > 0 )); then
             repo-add hoopoo.db.tar.gz "${pkgs[@]}"
-            repo-files hoopoo.files.tar.gz "${pkgs[@]}"
           fi
           ls -lh
         env:
