@@ -71,12 +71,13 @@ for pkg in $PACKAGES; do
     --s3-no-check-bucket --transfers 4 --progress
 done
 
-# Download existing packages from destination channel (for database rebuild)
+# Download only the database from destination channel
 echo ""
-echo "==> Downloading existing packages from $TO_CHANNEL..."
+echo "==> Downloading existing database from $TO_CHANNEL..."
+mkdir -p dest
 rclone copy "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" dest/ \
-  --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
-  --s3-no-check-bucket --transfers 8 --progress
+  --include "hoopoo.db.tar.zst" --include "hoopoo.files.tar.zst" \
+  --s3-no-check-bucket --progress
 
 # Create output directory for new packages
 mkdir -p output
@@ -110,43 +111,36 @@ if [[ ${#copied[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# Copy existing destination packages that aren't being replaced
+# Extract and update repository database
 echo ""
-echo "==> Merging with existing $TO_CHANNEL packages..."
-for file in dest/*.pkg.tar.zst; do
-  [[ -f $file ]] || continue
-  base=$(pkgbase "$(basename "$file")")
-  
-  # Check if this package is being replaced
-  skip=false
-  for copied_file in "${copied[@]}"; do
-    copied_base=$(pkgbase "$copied_file")
-    if [[ $base == "$copied_base" ]]; then
-      skip=true
-      echo "  Replacing: $(basename "$file") -> $copied_file"
-      break
-    fi
-  done
-  
-  if ! $skip; then
-    cp "$file" output/ 2>/dev/null || true
-    [[ -f "${file}.sig" ]] && cp "${file}.sig" output/ 2>/dev/null || true
-  fi
+echo "==> Updating repository database..."
+cd output
+
+# Extract existing database if it exists
+if [[ -f ../dest/hoopoo.db.tar.zst ]]; then
+  echo "  Extracting existing database..."
+  cp ../dest/hoopoo.db.tar.zst hoopoo.db.tar.zst
+  tar -xf hoopoo.db.tar.zst 2>/dev/null || true
+fi
+
+# Remove old package entries from database
+for copied_file in "${copied[@]}"; do
+  copied_base=$(pkgbase "$copied_file")
+  echo "  Removing old $copied_base entries from database..."
+  repo-remove hoopoo.db.tar.zst "$copied_base" 2>/dev/null || true
 done
 
-# Generate repository database
-echo ""
-echo "==> Generating repository database..."
-cd output
+# Add new packages to database
 shopt -s nullglob
 pkgs=(*.pkg.tar.zst)
 if (( ${#pkgs[@]} == 0 )); then
-  echo "Error: No packages in output directory!"
+  echo "Error: No packages to add!"
   exit 1
 fi
 
+echo "  Adding ${#pkgs[@]} package(s) to database..."
 repo-add hoopoo.db.tar.zst "${pkgs[@]}"
-echo "Database created with ${#pkgs[@]} packages"
+echo "Database updated"
 
 # Upload to R2
 echo ""
