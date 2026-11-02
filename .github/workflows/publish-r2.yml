@@ -88,6 +88,7 @@ jobs:
 
       - name: Install rclone
         run: |
+          pacman -S --noconfirm unzip
           curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o rclone.zip
           unzip -jq rclone.zip '*/rclone'
           chmod +x rclone
