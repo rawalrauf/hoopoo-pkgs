@@ -61,6 +61,14 @@ jobs:
       - name: Delete PKGBUILD directories
         if: inputs.delete_pkgbuild == true
         run: |
+          # Initialize git repo if checkout used REST API
+          if [[ ! -d .git ]]; then
+            git init
+            git remote add origin https://x-access-token:${{ secrets.BOT_PAT }}@github.com/rawalrauf/hoopoo-pkgs.git
+            git fetch origin edge
+            git checkout -b edge origin/edge
+          fi
+          
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
           
