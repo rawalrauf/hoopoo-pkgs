@@ -61,13 +61,17 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 cd "$WORKDIR"
 
-# Download existing packages from source channel
-echo "==> Downloading packages from $FROM_CHANNEL..."
-rclone copy "r2:hoopoo-pkgs/$FROM_CHANNEL/x86_64/" src/ \
-  --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
-  --s3-no-check-bucket --transfers 8 --progress
+# Download only requested packages from source channel
+echo "==> Downloading requested packages from $FROM_CHANNEL..."
+mkdir -p src
+for pkg in $PACKAGES; do
+  echo "  Fetching: $pkg-*.pkg.tar.zst"
+  rclone copy "r2:hoopoo-pkgs/$FROM_CHANNEL/x86_64/" src/ \
+    --include "$pkg-*.pkg.tar.zst" --include "$pkg-*.pkg.tar.zst.sig" \
+    --s3-no-check-bucket --transfers 4 --progress
+done
 
-# Download existing packages from destination channel
+# Download existing packages from destination channel (for database rebuild)
 echo ""
 echo "==> Downloading existing packages from $TO_CHANNEL..."
 rclone copy "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" dest/ \
