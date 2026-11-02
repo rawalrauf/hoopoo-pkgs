@@ -1,0 +1,99 @@
+name: Unpublish Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Space-separated list of packages to remove (e.g. linux-ptl nvidia-580xx-dkms)'
+        required: true
+      channels:
+        description: 'Channels to remove from'
+        required: true
+        default: 'edge stable'
+        type: choice
+        options:
+          - edge
+          - stable
+          - edge stable
+      delete_pkgbuild:
+        description: 'Also delete PKGBUILD directories and commit?'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  unpublish:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    environment: publish
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: edge
+          token: ${{ secrets.BOT_PAT }}
+
+      - name: Install dependencies
+        run: pacman -Sy --noconfirm rclone pacman git
+
+      - name: Unpublish from channels
+        run: |
+          for channel in ${{ inputs.channels }}; do
+            echo ""
+            echo "=== Processing $channel channel ==="
+            bash bin/unpublish-packages.sh \
+              --channel "$channel" \
+              --packages "${{ inputs.packages }}"
+          done
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+
+      - name: Delete PKGBUILD directories
+        if: inputs.delete_pkgbuild == true
+        run: |
+          git config user.name "hoopoo-bot"
+          git config user.email "bot@hoopoo"
+          
+          pkg_array=(${{ inputs.packages }})
+          deleted=()
+          
+          for pkg in "${pkg_array[@]}"; do
+            if [[ -d "pkgbuilds/$pkg" ]]; then
+              echo "Deleting pkgbuilds/$pkg"
+              rm -rf "pkgbuilds/$pkg"
+              deleted+=("$pkg")
+            else
+              echo "Warning: pkgbuilds/$pkg not found"
+            fi
+          done
+          
+          if [[ ${#deleted[@]} -eq 0 ]]; then
+            echo "No PKGBUILD directories to delete"
+            exit 0
+          fi
+          
+          # Build commit message
+          if [[ ${#deleted[@]} -eq 1 ]]; then
+            commit_msg="${deleted[0]} removed from repository"
+          elif [[ ${#deleted[@]} -eq 2 ]]; then
+            commit_msg="${deleted[0]} and ${deleted[1]} removed from repository"
+          else
+            # Three or more
+            msg="${deleted[0]}"
+            for ((i=1; i<${#deleted[@]}-1; i++)); do
+              msg="$msg, ${deleted[$i]}"
+            done
+            msg="$msg and ${deleted[$((${#deleted[@]}-1))]}"
+            commit_msg="$msg removed from repository"
+          fi
+          
+          git add pkgbuilds/
+          git commit -m "$commit_msg"
+          git push origin HEAD:refs/heads/edge

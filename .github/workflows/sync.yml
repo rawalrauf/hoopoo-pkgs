@@ -107,11 +107,11 @@ jobs:
     if: needs.sync.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger R2 publish workflow for edge
+      - name: Trigger publish workflow for edge
         env:
           GH_TOKEN: ${{ secrets.BOT_PAT }}
         run: |
-          gh workflow run publish-r2.yml \
+          gh workflow run publish.yml \
             --repo ${{ github.repository }} \
             --ref edge \
             --field packages="${{ needs.sync.outputs.changed_packages }}"

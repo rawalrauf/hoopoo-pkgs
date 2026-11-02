@@ -1,4 +1,4 @@
-name: Copy Packages Between Channels (R2)
+name: Copy Packages Between Channels
 
 on:
   workflow_dispatch:
