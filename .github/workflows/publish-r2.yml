@@ -238,7 +238,7 @@ jobs:
           # Upload database files (overwrite, these change)
           rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
             --include "hoopoo.db*" --include "hoopoo.files*" \
-            --s3-no-check-bucket
+            --copy-links --s3-no-check-bucket
           
           echo "Published to pkgs.hoopoo.net/$CHANNEL/x86_64/"
 
