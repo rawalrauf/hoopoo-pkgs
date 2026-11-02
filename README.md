@@ -32,8 +32,8 @@ Server = https://pkgs.hoopoo.net/edge/$arch
 
 **Channels:** `edge` → `stable`
 
-- **`edge`** — Latest versions, built automatically on push or upstream update. Packages are tested here before promotion.
-- **`stable`** — Production-ready packages, manually promoted from edge after validation.
+- **`edge`** — Latest versions, built automatically on push or upstream update. Testing ground for new packages and updates.
+- **`stable`** — Production-ready packages, manually promoted from edge after thorough testing.
 
 Packages build once against edge, and the same file is promoted to stable. A published filename never changes its bytes.
 
@@ -41,9 +41,9 @@ Packages build once against edge, and the same file is promoted to stable. A pub
 
 ```
 PR merge or upstream update
-  └─ publish.yml       build package, sign with GPG, publish to edge
-Manual promotion
-  └─ copy-packages.yml copy validated packages from edge to stable
+  └─ publish.yml       build package, sign with GPG, publish to edge for testing
+Manual promotion (after testing)
+  └─ copy-packages.yml copy tested packages from edge to stable
 ```
 
 To ship a change:
@@ -51,7 +51,7 @@ To ship a change:
 2. Merge to `edge` branch (or sync workflow commits automatically)
 3. Package builds and publishes to `edge` within minutes
 4. Test the package on `edge`
-5. Manually promote to `stable` when ready
+5. Manually promote to `stable` when tested and ready
 
 ## Contributing a package
 
@@ -191,9 +191,8 @@ This removes the package from the databases, deletes the package files from R2 s
 - **Hosting:** Cloudflare R2 (object storage)
 - **Domain:** `pkgs.hoopoo.net` with custom Cloudflare Worker
 - **CDN:** Cloudflare global edge network
-- **Signing:** GPG key `070030E5D914817BA797F66AAF1C8F036A5E73FD` (Hoopoo \<packages@hoopoo.dev\>)
+- **Signing:** GPG key `070030E5D914817BA797F66AAF1C8F036A5E73FD`
 - **CI/CD:** GitHub Actions
-- **Storage:** ~1 GB (edge) + ~1 GB (stable) ≈ $0.03/month
 - **Architecture:** x86_64 only
 
 ### Verification
@@ -203,4 +202,4 @@ All packages are verified at multiple stages:
 2. **GPG signatures** with Hoopoo signing key
 3. **Pacman structure validation** (`pacman -Qip`)
 
-This three-layer verification (inspired by Omarchy) ensures package integrity throughout the pipeline.
+This three-layer verification ensures package integrity throughout the pipeline.
