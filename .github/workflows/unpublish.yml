@@ -61,9 +61,8 @@ jobs:
       - name: Delete PKGBUILD directories
         if: inputs.delete_pkgbuild == true
         run: |
-          pwd
-          ls -la
-          test -d .git && echo ".git exists" || echo ".git NOT found"
+          # Fix .git ownership (created by root during checkout)
+          chown -R $(id -u):$(id -g) .git
           
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
