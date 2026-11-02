@@ -105,11 +105,43 @@ jobs:
         run: |
           CHANNEL="${{ steps.channel.outputs.name }}"
           mkdir -p repo
-          echo "Downloading existing packages from $CHANNEL..."
+          echo "Downloading existing packages and database from $CHANNEL..."
           rclone copy r2:hoopoo-pkgs/$CHANNEL/x86_64/ repo/ \
-            --include "*.pkg.tar.zst" --include "hoopoo.db.tar.zst" --include "hoopoo.files.tar.zst" \
+            --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
+            --include "hoopoo.db.tar.zst" --include "hoopoo.files.tar.zst" \
             --s3-no-check-bucket 2>/dev/null || echo "No existing packages found"
           ls -lh repo/ || true
+
+      - name: Verify downloaded packages integrity
+        run: |
+          CHANNEL="${{ steps.channel.outputs.name }}"
+          if [[ ! -f repo/hoopoo.db.tar.zst ]]; then
+            echo "No existing database, skipping verification"
+            exit 0
+          fi
+          
+          echo "==> Extracting SHA256 checksums from database..."
+          tar -xOf repo/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | awk '
+            $0 == "%FILENAME%" { getline; fname = $0; next }
+            $0 == "%SHA256SUM%" { getline; print fname, $0 }
+          ' > /tmp/db-checksums.txt
+          
+          echo "==> Verifying SHA256 checksums..."
+          failed=0
+          while read -r filename expected; do
+            [[ -f repo/$filename ]] || continue
+            got=$(sha256sum "repo/$filename" | awk '{print $1}')
+            if [[ $got != "$expected" ]]; then
+              echo "ERROR: SHA256 mismatch for $filename"
+              failed=$((failed + 1))
+            fi
+          done < /tmp/db-checksums.txt
+          
+          if (( failed > 0 )); then
+            echo "ERROR: $failed package(s) failed SHA256 verification"
+            exit 1
+          fi
+          echo "✓ All downloaded packages verified"
 
       - name: Build packages
         run: |
@@ -181,17 +213,57 @@ jobs:
       - name: Sign new packages
         if: env.nothing_to_publish != 'true'
         run: |
+          echo "==> Signing packages..."
+          signed=0
           for pkg in new-packages/*.pkg.tar.zst; do
             [[ -f $pkg ]] || continue
             # Skip if already signed
-            [[ -f $pkg.sig ]] && continue
-            echo "Signing $(basename $pkg)"
+            if [[ -f $pkg.sig ]]; then
+              echo "  Already signed: $(basename $pkg)"
+              continue
+            fi
+            echo "  Signing: $(basename $pkg)"
             gpg --batch --yes --pinentry-mode loopback \
               --passphrase "$GPG_PASSPHRASE" \
               --detach-sign "$pkg"
+            signed=$((signed + 1))
           done
+          echo "Signed $signed new package(s)"
         env:
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Verify all package signatures
+        if: env.nothing_to_publish != 'true'
+        run: |
+          echo "==> Verifying GPG signatures..."
+          failed=0
+          verified=0
+          
+          for pkg in new-packages/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            sig="${pkg}.sig"
+            
+            if [[ ! -f $sig ]]; then
+              echo "  ERROR: No signature for $(basename $pkg)"
+              failed=$((failed + 1))
+              continue
+            fi
+            
+            if gpg --batch --verify "$sig" "$pkg" 2>/dev/null; then
+              verified=$((verified + 1))
+            else
+              echo "  ERROR: Invalid signature for $(basename $pkg)"
+              failed=$((failed + 1))
+            fi
+          done
+          
+          echo "Verified: $verified, Failed: $failed"
+          
+          if (( failed > 0 )); then
+            echo "ERROR: $failed package(s) failed signature verification"
+            exit 1
+          fi
+          echo "✓ All packages have valid signatures"
 
       - name: Merge with existing packages
         if: env.nothing_to_publish != 'true'
