@@ -33,32 +33,35 @@ jobs:
             changed=$(git diff --name-only pkgbuilds/ | cut -d/ -f2 | sort -u)
             echo "changed_packages=$(echo "$changed" | tr '\n' ' ' | xargs)" >> $GITHUB_OUTPUT
             echo "has_changes=true" >> $GITHUB_OUTPUT
-            for pkg in $changed; do
-              git add pkgbuilds/$pkg/
-              git commit -m "pkg($pkg): sync upstream version"
-            done
+            
+            # Build human-friendly commit message
+            pkg_array=($changed)
+            pkg_count=${#pkg_array[@]}
+            
+            if [[ $pkg_count -eq 1 ]]; then
+              commit_msg="${pkg_array[0]} updated to latest release"
+            elif [[ $pkg_count -eq 2 ]]; then
+              commit_msg="${pkg_array[0]} and ${pkg_array[1]} updated to latest release"
+            else
+              # Three or more: "pkg1, pkg2, pkg3 and pkg4 updated to latest release"
+              msg="${pkg_array[0]}"
+              for ((i=1; i<pkg_count-1; i++)); do
+                msg="$msg, ${pkg_array[$i]}"
+              done
+              msg="$msg and ${pkg_array[$((pkg_count-1))]}"
+              commit_msg="$msg updated to latest release"
+            fi
+            
+            git add pkgbuilds/
+            git commit -m "$commit_msg"
             git push origin HEAD:refs/heads/edge
           else
             echo "has_changes=false" >> $GITHUB_OUTPUT
             echo "All packages up to date"
           fi
 
-  build-edge:
-    needs: sync
-    if: needs.sync.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger R2 publish workflow for edge
-        env:
-          GH_TOKEN: ${{ secrets.BOT_PAT }}
-        run: |
-          gh workflow run publish-r2.yml \
-            --repo ${{ github.repository }} \
-            --ref edge \
-            --field packages="${{ needs.sync.outputs.changed_packages }}"
-  
   promote:
-    needs: [sync, build-edge]
+    needs: sync
     if: needs.sync.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     container:
@@ -86,28 +89,7 @@ jobs:
           gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD || \
           gpg --keyserver hkps://keys.openpgp.org --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD || true
 
-      - name: Wait for edge build to complete
-        env:
-          GH_TOKEN: ${{ secrets.BOT_PAT }}
-        run: |
-          echo "Waiting 60s for edge build to start..."
-          sleep 60
-          
-          # Wait for publish-r2.yml to complete
-          timeout=600
-          elapsed=0
-          while (( elapsed < timeout )); do
-            if gh run list --workflow=publish-r2.yml --branch edge --limit 1 --json status \
-               | grep -q '"status":"completed"'; then
-              echo "Edge build completed"
-              break
-            fi
-            echo "Waiting for edge build... (${elapsed}s/${timeout}s)"
-            sleep 10
-            elapsed=$((elapsed + 10))
-          done
-
-      - name: Copy packages from edge to stable via R2
+      - name: Copy OLD packages from edge to stable via R2
         env:
           RCLONE_CONFIG_R2_TYPE: s3
           RCLONE_CONFIG_R2_PROVIDER: Cloudflare
@@ -119,3 +101,17 @@ jobs:
             --packages "${{ needs.sync.outputs.changed_packages }}" \
             --from edge \
             --to stable
+
+  build-edge:
+    needs: [sync, promote]
+    if: needs.sync.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger R2 publish workflow for edge
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+        run: |
+          gh workflow run publish-r2.yml \
+            --repo ${{ github.repository }} \
+            --ref edge \
+            --field packages="${{ needs.sync.outputs.changed_packages }}"
