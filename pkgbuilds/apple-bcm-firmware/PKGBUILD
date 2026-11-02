@@ -9,7 +9,7 @@ url='https://wiki.t2linux.org/guides/wifi-bluetooth/'
 license=('custom:Proprietary')
 conflicts=('apple-bcm-firmware-fetcher')
 source=("https://github.com/rawalrauf/hoopoo-pkgs/releases/download/apple-bcm-firmware-${pkgver}/apple-bcm-firmware-${pkgver}.tar.gz")
-sha256sums=('SKIP')  # Will be updated after first upload
+sha256sums=('ca1ce10fbedaf6b0c4b6539d8ed704f1d08986a2f5748afe61f48d29481fea3c')
 
 package() {
   cp -r "$srcdir/usr" "$pkgdir/"
