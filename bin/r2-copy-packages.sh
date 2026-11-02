@@ -61,7 +61,29 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 cd "$WORKDIR"
 
-# Download only requested packages from source channel
+# Download source database first to get SHA256 checksums
+echo "==> Downloading source database from $FROM_CHANNEL..."
+mkdir -p db-src
+rclone copy "r2:hoopoo-pkgs/$FROM_CHANNEL/x86_64/" db-src/ \
+  --include "hoopoo.db.tar.zst" --s3-no-check-bucket
+
+# Parse source database for package info (name, version, sha256)
+declare -A SRC_SHA256
+if [[ -f db-src/hoopoo.db.tar.zst ]]; then
+  tar -xOf db-src/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | awk '
+    $0 == "%FILENAME%" { getline; fname = $0; next }
+    $0 == "%SHA256SUM%" { getline; print fname, $0 }
+  ' > /tmp/src-checksums.txt
+  
+  while read -r filename sha256; do
+    SRC_SHA256["$filename"]="$sha256"
+  done < /tmp/src-checksums.txt
+  
+  echo "  Found $(wc -l < /tmp/src-checksums.txt) packages in $FROM_CHANNEL database"
+fi
+
+# Download only requested packages from source channel via rclone
+echo ""
 echo "==> Downloading requested packages from $FROM_CHANNEL..."
 mkdir -p src
 for pkg in $PACKAGES; do
@@ -71,7 +93,7 @@ for pkg in $PACKAGES; do
     --s3-no-check-bucket --transfers 4 --progress
 done
 
-# Download ALL existing packages from destination channel
+# Download ALL existing packages from destination channel via rclone
 echo ""
 echo "==> Downloading all existing packages from $TO_CHANNEL..."
 mkdir -p dest
@@ -79,15 +101,78 @@ rclone copy "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" dest/ \
   --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
   --s3-no-check-bucket --transfers 8 --progress
 
+# Verify SHA256 checksums against source database
 echo ""
-echo "==> Validating packages with pacman..."
-# Install packages to /tmp to validate them (catches corruption early)
+echo "==> Verifying SHA256 checksums..."
+failed=0
+for pkg in src/*.pkg.tar.zst; do
+  [[ -f $pkg ]] || continue
+  filename=$(basename "$pkg")
+  expected=${SRC_SHA256["$filename"]:-}
+  
+  if [[ -z $expected ]]; then
+    echo "  WARNING: No SHA256 in database for $filename"
+    continue
+  fi
+  
+  got=$(sha256sum "$pkg" | awk '{print $1}')
+  if [[ $got != "$expected" ]]; then
+    echo "  ERROR: SHA256 mismatch for $filename"
+    echo "    Expected: $expected"
+    echo "    Got:      $got"
+    failed=$((failed + 1))
+  else
+    echo "  ✓ $filename"
+  fi
+done
+
+if (( failed > 0 )); then
+  echo "ERROR: $failed package(s) failed SHA256 verification"
+  exit 1
+fi
+
+# Verify GPG signatures
+echo ""
+echo "==> Verifying GPG signatures..."
+for pkg in src/*.pkg.tar.zst dest/*.pkg.tar.zst; do
+  [[ -f $pkg ]] || continue
+  sig="${pkg}.sig"
+  
+  if [[ ! -f $sig ]]; then
+    echo "  WARNING: No signature for $(basename "$pkg")"
+    continue
+  fi
+  
+  if gpg --batch --verify "$sig" "$pkg" 2>/dev/null; then
+    echo "  ✓ $(basename "$pkg")"
+  else
+    echo "  ERROR: Invalid signature for $(basename "$pkg")"
+    failed=$((failed + 1))
+  fi
+done
+
+if (( failed > 0 )); then
+  echo "ERROR: $failed package(s) failed GPG verification"
+  exit 1
+fi
+
+# Validate package structure with pacman
+echo ""
+echo "==> Validating package structure with pacman..."
 for pkg in src/*.pkg.tar.zst dest/*.pkg.tar.zst; do
   [[ -f $pkg ]] || continue
   if ! pacman -Qip "$pkg" &>/dev/null; then
-    echo "  WARNING: Package validation failed: $(basename "$pkg")"
+    echo "  ERROR: Package structure invalid: $(basename "$pkg")"
+    failed=$((failed + 1))
   fi
 done
+
+if (( failed > 0 )); then
+  echo "ERROR: $failed package(s) failed structure validation"
+  exit 1
+fi
+
+echo "  All packages verified successfully"
 
 # Create output directory for new packages
 mkdir -p output
