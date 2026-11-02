@@ -3,3 +3,4 @@ output/
 *.pkg.tar.xz
 src/
 pkg/
+bin/health-check.sh
