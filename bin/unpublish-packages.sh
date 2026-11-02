@@ -93,19 +93,12 @@ for base in "${pkg_array[@]}"; do
     fi
   done < <(tar -xOf repo/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
     awk -v base="$base" '
-      /^%NAME%$/ { getline name }
-      /^%BASE%$/ { getline pkgbase }
-      /^%FILENAME%$/ { getline filename }
-      /^$/ {
-        if (pkgbase == base && name != "" && filename != "") {
-          print name "|" filename
-        }
+      $0 == "%NAME%" { getline name }
+      $0 == "%BASE%" { getline pkgbase }
+      $0 == "%FILENAME%" { getline filename }
+      $0 == "" && pkgbase == base && name != "" && filename != "" {
+        print name "|" filename
         name = ""; pkgbase = ""; filename = ""
-      }
-      END {
-        if (pkgbase == base && name != "" && filename != "") {
-          print name "|" filename
-        }
       }
     ')
 done
