@@ -102,6 +102,11 @@ for base in "${pkg_array[@]}"; do
         }
         name = ""; pkgbase = ""; filename = ""
       }
+      END {
+        if (pkgbase == base && name != "" && filename != "") {
+          print name "|" filename
+        }
+      }
     ')
 done
 
