@@ -81,23 +81,28 @@ echo ""
 echo "==> Finding packages to remove..."
 pkg_array=($PACKAGES)
 remove_list=()
+declare -A filename_map
 
 for base in "${pkg_array[@]}"; do
-  # Extract package names that match this base
-  names=$(tar -xOf repo/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
-    awk -v base="$base" '
-      /^%NAME%$/ { getline name }
-      /^%BASE%$/ { getline pkgbase; if (pkgbase == base) print name }
-    ')
-  
-  if [[ -n $names ]]; then
-    while IFS= read -r name; do
+  # Extract package names and filenames that match this base
+  while IFS='|' read -r name filename; do
+    if [[ -n $name ]]; then
       echo "  Found: $name (from $base)"
       remove_list+=("$name")
-    done <<< "$names"
-  else
-    echo "  Warning: $base not found in $CHANNEL database"
-  fi
+      filename_map["$name"]="$filename"
+    fi
+  done < <(tar -xOf repo/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
+    awk -v base="$base" '
+      /^%NAME%$/ { getline name }
+      /^%BASE%$/ { getline pkgbase }
+      /^%FILENAME%$/ { getline filename }
+      /^$/ {
+        if (pkgbase == base && name != "" && filename != "") {
+          print name "|" filename
+        }
+        name = ""; pkgbase = ""; filename = ""
+      }
+    ')
 done
 
 if [[ ${#remove_list[@]} -eq 0 ]]; then
@@ -127,20 +132,19 @@ if (( removed != ${#remove_list[@]} )); then
   echo "WARNING: Expected to remove ${#remove_list[@]} entries, but removed $removed"
 fi
 
-# Extract filenames for packages to delete
+# Prepare list of files to delete from R2
 echo ""
-echo "==> Finding package files to delete from R2..."
+echo "==> Preparing package files for deletion from R2..."
 cd "$WORKDIR"
 delete_files=()
 
 for pkg_name in "${remove_list[@]}"; do
-  # Get filename from the original database
-  filename=$(tar -xOf repo/hoopoo.db.tar.zst --wildcards "*$pkg_name*/desc" 2>/dev/null | \
-    awk '/^%FILENAME%$/ { getline; print; exit }')
-  
+  filename="${filename_map[$pkg_name]}"
   if [[ -n $filename ]]; then
     echo "  Marking for deletion: $filename"
     delete_files+=("$filename" "$filename.sig")
+  else
+    echo "  Warning: Could not find filename for $pkg_name"
   fi
 done
 
