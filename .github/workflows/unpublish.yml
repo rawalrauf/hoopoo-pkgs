@@ -24,46 +24,52 @@ on:
 jobs:
   unpublish:
     runs-on: ubuntu-latest
-    container:
-      image: archlinux/archlinux:latest
     environment: publish
     permissions:
       contents: write
 
     steps:
-      - name: Install git first
-        run: pacman -Sy --noconfirm git
-      
       - uses: actions/checkout@v4
         with:
           ref: edge
           token: ${{ secrets.BOT_PAT }}
 
-      - name: Install dependencies
-        run: pacman -Sy --noconfirm rclone pacman
+      - name: Setup Arch container for unpublish
+        run: |
+          docker pull archlinux/archlinux:latest
+          docker create --name unpublish-container \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            archlinux/archlinux:latest tail -f /dev/null
+          docker start unpublish-container
+          docker exec unpublish-container pacman -Sy --noconfirm rclone pacman
 
       - name: Unpublish from channels
         run: |
           for channel in ${{ inputs.channels }}; do
             echo ""
             echo "=== Processing $channel channel ==="
-            bash bin/unpublish-packages.sh \
-              --channel "$channel" \
-              --packages "${{ inputs.packages }}"
+            docker exec \
+              -e RCLONE_CONFIG_R2_TYPE=s3 \
+              -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+              -e RCLONE_CONFIG_R2_ACCESS_KEY_ID="${{ secrets.R2_ACCESS_KEY_ID }}" \
+              -e RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="${{ secrets.R2_SECRET_ACCESS_KEY }}" \
+              -e RCLONE_CONFIG_R2_ENDPOINT="${{ secrets.R2_ENDPOINT_URL }}" \
+              unpublish-container \
+              bash bin/unpublish-packages.sh \
+                --channel "$channel" \
+                --packages "${{ inputs.packages }}"
           done
-        env:
-          RCLONE_CONFIG_R2_TYPE: s3
-          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
-          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+
+      - name: Cleanup container
+        if: always()
+        run: |
+          docker stop unpublish-container || true
+          docker rm unpublish-container || true
 
       - name: Delete PKGBUILD directories
         if: inputs.delete_pkgbuild == true
         run: |
-          # Fix .git ownership (created by root during checkout)
-          chown -R $(id -u):$(id -g) .git
-          
           git config user.name "hoopoo-bot"
           git config user.email "bot@hoopoo"
           
