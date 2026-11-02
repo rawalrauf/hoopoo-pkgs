@@ -161,7 +161,18 @@ jobs:
           done
 
           echo "Built: $built, Reused: $skipped"
-          if (( built == 0 && skipped == 0 )); then
+          
+          # Copy all existing packages that weren't already copied
+          for pkg in repo/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            basename=$(basename "$pkg")
+            [[ -f new-packages/$basename ]] || cp "$pkg" new-packages/
+          done
+          
+          total_pkgs=$(ls new-packages/*.pkg.tar.zst 2>/dev/null | wc -l)
+          echo "Total packages ready: $total_pkgs"
+          
+          if (( total_pkgs == 0 )); then
             echo "No packages to publish"
             echo "nothing_to_publish=true" >> $GITHUB_ENV
           fi
