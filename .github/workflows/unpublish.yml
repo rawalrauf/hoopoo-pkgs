@@ -93,9 +93,9 @@ jobs:
           
           # Build commit message
           if [[ ${#deleted[@]} -eq 1 ]]; then
-            commit_msg="${deleted[0]} removed from repository"
+            commit_msg="${deleted[0]} officially retired"
           elif [[ ${#deleted[@]} -eq 2 ]]; then
-            commit_msg="${deleted[0]} and ${deleted[1]} removed from repository"
+            commit_msg="${deleted[0]} and ${deleted[1]} officially retired"
           else
             # Three or more
             msg="${deleted[0]}"
@@ -103,7 +103,7 @@ jobs:
               msg="$msg, ${deleted[$i]}"
             done
             msg="$msg and ${deleted[$((${#deleted[@]}-1))]}"
-            commit_msg="$msg removed from repository"
+            commit_msg="$msg officially retired"
           fi
           
           git add pkgbuilds/
