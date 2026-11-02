@@ -1,4 +1,4 @@
-name: Copy Packages Between Branches
+name: Copy Packages Between Channels (R2)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: 'Space-separated list of packages to copy (e.g. linux-ptl nvidia-580xx-utils)'
         required: true
       from:
-        description: 'Source branch/release'
+        description: 'Source channel'
         required: true
         default: 'edge'
         type: choice
@@ -15,29 +15,13 @@ on:
           - edge
           - stable
       to:
-        description: 'Destination branch/release'
+        description: 'Destination channel'
         required: true
         default: 'stable'
         type: choice
         options:
           - stable
           - edge
-  workflow_call:
-    inputs:
-      packages:
-        description: 'Space-separated list of packages to copy'
-        required: true
-        type: string
-      from:
-        description: 'Source release tag'
-        required: false
-        default: 'edge'
-        type: string
-      to:
-        description: 'Destination release tag'
-        required: false
-        default: 'stable'
-        type: string
 
 jobs:
   copy:
@@ -50,15 +34,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup tools
-        run: pacman -Sy --noconfirm pacman github-cli python curl
+      - name: Install dependencies
+        run: pacman -Sy --noconfirm rclone pacman
 
-      - name: Copy packages
+      - name: Copy packages via R2
         run: |
-          python3 bin/pkg-utils.py \
+          bash bin/r2-copy-packages.sh \
             --packages "${{ inputs.packages }}" \
             --from "${{ inputs.from }}" \
             --to "${{ inputs.to }}"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
