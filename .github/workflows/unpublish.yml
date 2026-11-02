@@ -31,13 +31,16 @@ jobs:
       contents: write
 
     steps:
+      - name: Install git first
+        run: pacman -Sy --noconfirm git
+      
       - uses: actions/checkout@v4
         with:
           ref: edge
           token: ${{ secrets.BOT_PAT }}
 
       - name: Install dependencies
-        run: pacman -Sy --noconfirm rclone pacman git
+        run: pacman -Sy --noconfirm rclone pacman
 
       - name: Unpublish from channels
         run: |
