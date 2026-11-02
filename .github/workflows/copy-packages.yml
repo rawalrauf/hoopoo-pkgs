@@ -35,7 +35,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: pacman -Sy --noconfirm rclone pacman
+        run: pacman -Sy --noconfirm rclone pacman gnupg
+
+      - name: Import Hoopoo GPG key
+        run: |
+          # Import the public key for verification
+          curl -sL https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1.0.0-4-any.pkg.tar.zst -o /tmp/hoopoo-keyring.pkg.tar.zst
+          pacman -U --noconfirm /tmp/hoopoo-keyring.pkg.tar.zst || true
+          pacman-key --init
+          pacman-key --populate hoopoo || true
+          
+          # Also import directly from keyserver as backup
+          gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD || \
+          gpg --keyserver hkps://keys.openpgp.org --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD || true
 
       - name: Copy packages via R2
         run: |
