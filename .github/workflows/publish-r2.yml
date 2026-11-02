@@ -1,0 +1,241 @@
+name: Publish to R2
+
+on:
+  push:
+    branches: [edge, stable]
+    paths:
+      - 'pkgbuilds/**'
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel to publish to (edge or stable)'
+        required: true
+        default: 'edge'
+        type: choice
+        options:
+          - edge
+          - stable
+      packages:
+        description: 'Space-separated list of packages to build (empty = changed packages)'
+        required: false
+
+concurrency:
+  group: publish-r2-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    environment: r2-publish
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup build environment
+        run: |
+          # Enable multilib
+          if ! grep -q '^\[multilib\]' /etc/pacman.conf; then
+            printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
+          fi
+          pacman -Sy --noconfirm base-devel git gnupg curl
+
+          useradd -m builder 2>/dev/null || true
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          chown -R builder "$GITHUB_WORKSPACE"
+
+          # Import Hoopoo signing key
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          echo "allow-preset-passphrase" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys | grep Keygrip | head -1 | awk '{print $3}')
+          if [[ -n $KEYGRIP ]]; then
+            /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE" 2>/dev/null || true
+          fi
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Determine channel
+        id: channel
+        run: |
+          if [[ -n "${{ github.event.inputs.channel }}" ]]; then
+            echo "name=${{ github.event.inputs.channel }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/stable" ]]; then
+            echo "name=stable" >> $GITHUB_OUTPUT
+          else
+            echo "name=edge" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine packages to build
+        id: packages
+        run: |
+          if [[ -n "${{ github.event.inputs.packages }}" ]]; then
+            echo "list=${{ github.event.inputs.packages }}" >> $GITHUB_OUTPUT
+          else
+            changed=$(git diff --name-only HEAD~1 HEAD 2>/dev/null | grep '^pkgbuilds/' | cut -d/ -f2 | sort -u | tr '\n' ' ')
+            if [[ -z $changed ]]; then
+              echo "No packages changed, building all"
+              changed=$(ls pkgbuilds/ | tr '\n' ' ')
+            fi
+            echo "list=$changed" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o rclone.zip
+          unzip -jq rclone.zip '*/rclone'
+          chmod +x rclone
+          mv rclone /usr/local/bin/
+          rclone version
+
+      - name: Download existing packages from R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          CHANNEL="${{ steps.channel.outputs.name }}"
+          mkdir -p repo
+          echo "Downloading existing packages from $CHANNEL..."
+          rclone copy r2:hoopoo-pkgs/$CHANNEL/x86_64/ repo/ \
+            --include "*.pkg.tar.zst" --include "hoopoo.db.tar.zst" --include "hoopoo.files.tar.zst" \
+            --s3-no-check-bucket 2>/dev/null || echo "No existing packages found"
+          ls -lh repo/ || true
+
+      - name: Build packages
+        run: |
+          mkdir -p new-packages
+          built=0
+          skipped=0
+
+          for pkg in ${{ steps.packages.outputs.list }}; do
+            [[ -d pkgbuilds/$pkg ]] || continue
+
+            # Get package metadata
+            pkgver=$(bash -c "source pkgbuilds/$pkg/PKGBUILD 2>/dev/null && echo \${epoch:+\$epoch:}\$pkgver-\$pkgrel" 2>/dev/null)
+            pkgname=$(bash -c "source pkgbuilds/$pkg/PKGBUILD 2>/dev/null && echo \$pkgname" 2>/dev/null)
+            arch_arr=$(bash -c "source pkgbuilds/$pkg/PKGBUILD 2>/dev/null && echo \${arch[*]}" 2>/dev/null)
+
+            if [[ $arch_arr == "any" ]]; then
+              arch="any"
+            else
+              arch="x86_64"
+            fi
+
+            # Check if already exists
+            if [[ -n $pkgver && -n $pkgname && -n $arch ]]; then
+              encoded_ver="${pkgver//:/.}"
+              encoded_ver="${encoded_ver//+/.2B}"
+              expected_file="${pkgname}-${encoded_ver}-${arch}.pkg.tar.zst"
+              if [[ -f repo/$expected_file ]]; then
+                echo "=== Skipping $pkg ($expected_file already in repo) ==="
+                cp repo/$expected_file new-packages/
+                skipped=$(( skipped + 1 ))
+                continue
+              fi
+            fi
+
+            echo "=== Building $pkg ==="
+            cp -r pkgbuilds/$pkg /tmp/build-$pkg
+            chown -R builder /tmp/build-$pkg
+            cd /tmp/build-$pkg
+            
+            sudo -u builder makepkg -s --noconfirm --noprogressbar --needed 2>&1 || {
+              echo "FAILED: $pkg"
+              cd $GITHUB_WORKSPACE
+              continue
+            }
+            
+            cp *.pkg.tar.zst $GITHUB_WORKSPACE/new-packages/ 2>/dev/null || true
+            built=$(( built + 1 ))
+            cd $GITHUB_WORKSPACE
+          done
+
+          echo "Built: $built, Reused: $skipped"
+          if (( built == 0 && skipped == 0 )); then
+            echo "No packages to publish"
+            echo "nothing_to_publish=true" >> $GITHUB_ENV
+          fi
+          ls -lh new-packages/ 2>/dev/null || true
+
+      - name: Sign new packages
+        if: env.nothing_to_publish != 'true'
+        run: |
+          for pkg in new-packages/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            # Skip if already signed
+            [[ -f $pkg.sig ]] && continue
+            echo "Signing $(basename $pkg)"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --detach-sign "$pkg"
+          done
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Merge with existing packages
+        if: env.nothing_to_publish != 'true'
+        run: |
+          # Copy existing packages to new-packages (avoiding duplicates)
+          for pkg in repo/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            basename=$(basename "$pkg")
+            [[ -f new-packages/$basename ]] || cp "$pkg" new-packages/
+          done
+
+          # Generate repo database
+          cd new-packages
+          shopt -s nullglob
+          pkgs=(*.pkg.tar.zst)
+          if (( ${#pkgs[@]} > 0 )); then
+            repo-add hoopoo.db.tar.zst "${pkgs[@]}"
+            ln -sf hoopoo.db.tar.zst hoopoo.db
+            ln -sf hoopoo.files.tar.zst hoopoo.files
+            echo "Database created with ${#pkgs[@]} packages"
+          else
+            echo "No packages found!"
+            exit 1
+          fi
+          ls -lh
+
+      - name: Upload to R2
+        if: env.nothing_to_publish != 'true'
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          CHANNEL="${{ steps.channel.outputs.name }}"
+          cd new-packages
+          
+          # Upload packages and signatures (skip existing, immutable)
+          rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
+            --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
+            --s3-no-check-bucket --transfers 8 --ignore-existing
+          
+          # Upload database files (overwrite, these change)
+          rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
+            --include "hoopoo.db*" --include "hoopoo.files*" \
+            --s3-no-check-bucket
+          
+          echo "Published to pkgs.hoopoo.net/$CHANNEL/x86_64/"
+
+      - name: Verify upload
+        if: env.nothing_to_publish != 'true'
+        run: |
+          CHANNEL="${{ steps.channel.outputs.name }}"
+          echo "Verifying pkgs.hoopoo.net/$CHANNEL/x86_64/hoopoo.db exists..."
+          sleep 5
+          curl -fsSL --retry 3 "https://pkgs.hoopoo.net/$CHANNEL/x86_64/hoopoo.db" > /dev/null && \
+            echo "✓ Database is live" || \
+            echo "⚠ Database not yet available (may take a moment to propagate)"
