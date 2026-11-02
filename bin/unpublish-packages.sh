@@ -6,9 +6,9 @@
 # What it does:
 #   1. Downloads current database from R2
 #   2. Uses repo-remove to remove package entries
-#   3. Uploads updated database back to R2
-#   4. Package files stay in R2 (immutable, no cost)
-#   5. Users won't see the package anymore (removed from database)
+#   3. Deletes package files (.pkg.tar.zst and .sig) from R2
+#   4. Uploads updated database back to R2
+#   5. Package is completely removed (database + files)
 
 set -euo pipefail
 
@@ -127,14 +127,46 @@ if (( removed != ${#remove_list[@]} )); then
   echo "WARNING: Expected to remove ${#remove_list[@]} entries, but removed $removed"
 fi
 
+# Extract filenames for packages to delete
+echo ""
+echo "==> Finding package files to delete from R2..."
+cd "$WORKDIR"
+delete_files=()
+
+for pkg_name in "${remove_list[@]}"; do
+  # Get filename from the original database
+  filename=$(tar -xOf repo/hoopoo.db.tar.zst --wildcards "*$pkg_name*/desc" 2>/dev/null | \
+    awk '/^%FILENAME%$/ { getline; print; exit }')
+  
+  if [[ -n $filename ]]; then
+    echo "  Marking for deletion: $filename"
+    delete_files+=("$filename" "$filename.sig")
+  fi
+done
+
+# Delete package files from R2
+if [[ ${#delete_files[@]} -gt 0 ]]; then
+  echo ""
+  echo "==> Deleting package files from R2..."
+  deleted=0
+  for file in "${delete_files[@]}"; do
+    if rclone deletefile "r2:hoopoo-pkgs/$CHANNEL/x86_64/$file" --s3-no-check-bucket 2>/dev/null; then
+      echo "  Deleted: $file"
+      deleted=$((deleted + 1))
+    else
+      echo "  Not found or already deleted: $file"
+    fi
+  done
+  echo "  Deleted $deleted file(s)"
+fi
+
 # Upload updated database
 echo ""
 echo "==> Uploading updated database to R2..."
+cd "$WORKDIR/repo"
 rclone copy . "r2:hoopoo-pkgs/$CHANNEL/x86_64/" \
   --include "hoopoo.db*" --include "hoopoo.files*" \
   --copy-links --s3-no-check-bucket
 
 echo ""
-echo "✓ Removed ${#remove_list[@]} package(s) from $CHANNEL"
-echo ""
-echo "Note: Package files remain in R2 (immutable URLs, zero cost)"
+echo "✓ Completely removed ${#remove_list[@]} package(s) from $CHANNEL (database + files)"

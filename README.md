@@ -1,6 +1,6 @@
 # Hoopoo Packages
 
-Personal pacman repository for [Hoopoo](https://github.com/rawalrauf/omarchy) — packages not available in standard Arch repos.
+Personal pacman repository for Hoopoo Linux — packages not available in standard Arch repos.
 
 ## Add to pacman
 
@@ -9,9 +9,7 @@ First install the keyring to trust Hoopoo packages:
 ```bash
 sudo pacman-key --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD --keyserver keyserver.ubuntu.com
 sudo pacman-key --lsign-key 070030E5D914817BA797F66AAF1C8F036A5E73FD
-KEYRING_URL=$(curl -sL "https://api.github.com/repos/rawalrauf/hoopoo-pkgs/releases/tags/stable" \
-  | python3 -c "import json,sys; print(next(a['browser_download_url'] for a in json.load(sys.stdin)['assets'] if 'hoopoo-keyring' in a['name'] and a['name'].endswith('.pkg.tar.zst')))")
-sudo pacman -U "$KEYRING_URL"
+sudo pacman -U https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1-1-any.pkg.tar.zst
 ```
 
 Then add to `/etc/pacman.conf`:
@@ -19,12 +17,20 @@ Then add to `/etc/pacman.conf`:
 ```ini
 [hoopoo]
 SigLevel = Required DatabaseOptional
-Server = https://github.com/rawalrauf/hoopoo-pkgs/releases/download/stable
+Server = https://pkgs.hoopoo.net/stable/$arch
 ```
 
-## Branches
+For testing/latest packages, use the edge channel:
 
-- `stable` — packages promoted from edge automatically when a new version is detected upstream
+```ini
+[hoopoo]
+SigLevel = Required DatabaseOptional
+Server = https://pkgs.hoopoo.net/edge/$arch
+```
+
+## Channels
+
+- `stable` — production packages, promoted from edge when tested
 - `edge` — latest versions, built automatically on push or upstream update
 
 ## Adding a package

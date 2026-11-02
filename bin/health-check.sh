@@ -64,7 +64,7 @@ done
 info "Checking critical files..."
 
 required_files=(
-  ".github/workflows/publish-r2.yml"
+  ".github/workflows/publish.yml"
   ".github/workflows/sync.yml"
   ".github/workflows/copy-packages.yml"
   "bin/r2-copy-packages.sh"
@@ -111,25 +111,25 @@ done
 section "3. Workflow Configuration Check"
 # ==============================================================================
 
-info "Checking publish-r2.yml..."
+info "Checking publish.yml..."
 
-if grep -q "r2:hoopoo-pkgs" .github/workflows/publish-r2.yml; then
+if grep -q "r2:hoopoo-pkgs" .github/workflows/publish.yml; then
   success "Uses R2 (hoopoo-pkgs bucket)"
 else
   error "Does not use R2"
 fi
 
-if grep -q "github.com.*releases" .github/workflows/publish-r2.yml; then
+if grep -q "github.com.*releases" .github/workflows/publish.yml; then
   warn "Still references GitHub Releases"
 fi
 
-if grep -q "GPG_PRIVATE_KEY" .github/workflows/publish-r2.yml; then
+if grep -q "GPG_PRIVATE_KEY" .github/workflows/publish.yml; then
   success "GPG signing configured"
 else
   error "GPG signing not configured"
 fi
 
-if grep -q "SHA256" .github/workflows/publish-r2.yml; then
+if grep -q "SHA256" .github/workflows/publish.yml; then
   success "SHA256 verification enabled"
 else
   warn "SHA256 verification missing"
@@ -365,20 +365,26 @@ cleanup_branches=(
   "simplify-to-omarchy"
 )
 
+found_obsolete=false
 for branch in "${cleanup_branches[@]}"; do
   if git show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null || \
      git show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
     echo "  - $branch (R2 handles channels now)"
+    found_obsolete=true
   fi
 done
 
-info ""
-info "To delete local branches:"
-echo "  git branch -D stable master edge_branch add-r2-workflow omarchy-approach simplify-to-omarchy"
+if ! $found_obsolete; then
+  info "  None - all obsolete branches already cleaned up!"
+else
+  info ""
+  info "To delete local branches:"
+  echo "  git branch -D stable master edge_branch add-r2-workflow omarchy-approach simplify-to-omarchy"
 
-info ""
-info "To delete remote branches:"
-echo "  git push origin --delete stable master edge_branch add-r2-workflow omarchy-approach simplify-to-omarchy"
+  info ""
+  info "To delete remote branches:"
+  echo "  git push origin --delete stable master edge_branch add-r2-workflow omarchy-approach simplify-to-omarchy"
+fi
 
 # ==============================================================================
 section "Summary"

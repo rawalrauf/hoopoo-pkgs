@@ -7,7 +7,7 @@ on:
         description: 'Space-separated list of packages to remove (e.g. linux-ptl nvidia-580xx-dkms)'
         required: true
       channels:
-        description: 'Channels to remove from'
+        description: 'Channels to remove from (removes from database AND deletes files from R2)'
         required: true
         default: 'edge stable'
         type: choice
