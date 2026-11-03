@@ -235,18 +235,13 @@ if [[ -f dest/hoopoo.db.tar.zst ]]; then
     [[ -f "${file}.sig" ]] && cp "${file}.sig" output/
   done
   
-  # Incrementally add new packages to existing database
+  # Incrementally add ALL downloaded packages to existing database
   cd output
   shopt -s nullglob
-  new_pkgs=()
-  for file in "${copied_files[@]}"; do
-    if [[ -f $file ]]; then
-      new_pkgs+=("$file")
-    fi
-  done
+  new_pkgs=(*.pkg.tar.zst)
   
   if (( ${#new_pkgs[@]} > 0 )); then
-    echo "  Appending ${#new_pkgs[@]} package(s) to database..."
+    echo "  Appending ${#new_pkgs[@]} package(s) to database (including split packages)..."
     repo-add hoopoo.db.tar.zst "${new_pkgs[@]}"
     
     # Count total packages in database
