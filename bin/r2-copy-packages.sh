@@ -188,21 +188,21 @@ echo "  All packages verified successfully"
 # Create output directory for new packages
 mkdir -p output
 
-# Copy requested packages to output
+# Verify requested packages exist and collect all downloaded files
 echo ""
 echo "==> Preparing packages for promotion..."
-copied=()
-copied_files=()
+requested_found=()
+all_pkgs=()
 for pkg_name in $PACKAGES; do
   found=false
   for file in src/*.pkg.tar.zst; do
     [[ -f $file ]] || continue
     base=$(pkgbase "$(basename "$file")")
     if [[ $base == "$pkg_name" ]]; then
-      echo "  Ready to promote: $(basename "$file")"
-      copied+=("$pkg_name")
-      copied_files+=("$(basename "$file")")
-      found=true
+      if ! $found; then
+        requested_found+=("$pkg_name")
+        found=true
+      fi
     fi
   done
   
@@ -211,11 +211,19 @@ for pkg_name in $PACKAGES; do
   fi
 done
 
-if [[ ${#copied[@]} -eq 0 ]]; then
+if [[ ${#requested_found[@]} -eq 0 ]]; then
   echo ""
   echo "No packages to promote. Exiting."
   exit 0
 fi
+
+# Collect all downloaded package names (including split packages)
+for file in src/*.pkg.tar.zst; do
+  [[ -f $file ]] || continue
+  base=$(pkgbase "$(basename "$file")")
+  echo "  Ready to promote: $(basename "$file")"
+  all_pkgs+=("$base")
+done
 
 # Check if destination database exists, or if we need to create fresh
 echo ""
@@ -290,7 +298,7 @@ rclone copy . "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
 
 echo ""
 echo "✓ Copy complete!"
-echo "  Promoted: ${copied[*]}"
+echo "  Promoted packages: ${all_pkgs[*]}"
 echo "  Destination: pkgs.hoopoo.net/$TO_CHANNEL/x86_64/"
 echo ""
 echo "Note: Existing packages remain in R2. Only new packages and database were uploaded."
