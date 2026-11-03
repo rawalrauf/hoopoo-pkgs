@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       packages:
-        description: 'Space-separated list of packages to copy (e.g. linux-ptl nvidia-580xx-utils)'
+        description: 'Space-separated list of package base names to copy (e.g. voxtype linux-ptl). Automatically includes split packages.'
         required: true
       from:
         description: 'Source channel'
