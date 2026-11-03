@@ -1,6 +1,14 @@
 #!/bin/bash
 # R2-based package copy script
 # Copies packages between R2 channels (edge/stable)
+#
+# OPTIMIZATION: Incremental database updates
+# - Downloads ONLY destination database (~800 KB)
+# - Downloads ONLY packages being promoted
+# - Uses repo-add to append to existing database
+# - Uploads ONLY new packages + updated database
+# - Existing packages stay in R2 (never re-downloaded or re-uploaded)
+# - Much faster and scales better as repository grows
 
 set -euo pipefail
 
@@ -93,13 +101,13 @@ for pkg in $PACKAGES; do
     --s3-no-check-bucket --transfers 4 --progress
 done
 
-# Download ALL existing packages from destination channel via rclone
+# Download ONLY destination database (incremental approach - no package downloads!)
 echo ""
-echo "==> Downloading all existing packages from $TO_CHANNEL..."
+echo "==> Downloading destination database from $TO_CHANNEL..."
 mkdir -p dest
 rclone copy "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" dest/ \
-  --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
-  --s3-no-check-bucket --transfers 8 --progress
+  --include "hoopoo.db.tar.zst" --include "hoopoo.files.tar.zst" \
+  --s3-no-check-bucket 2>/dev/null || echo "No existing database found"
 
 # Verify SHA256 checksums against source database
 echo ""
@@ -131,10 +139,11 @@ if (( failed > 0 )); then
   exit 1
 fi
 
-# Verify GPG signatures
+# Verify GPG signatures (only for newly downloaded packages from source)
 echo ""
 echo "==> Verifying GPG signatures..."
-for pkg in src/*.pkg.tar.zst dest/*.pkg.tar.zst; do
+failed=0
+for pkg in src/*.pkg.tar.zst; do
   [[ -f $pkg ]] || continue
   sig="${pkg}.sig"
   
@@ -156,14 +165,16 @@ if (( failed > 0 )); then
   exit 1
 fi
 
-# Validate package structure with pacman
+# Validate package structure with pacman (only for newly downloaded packages)
 echo ""
 echo "==> Validating package structure with pacman..."
-for pkg in src/*.pkg.tar.zst dest/*.pkg.tar.zst; do
+for pkg in src/*.pkg.tar.zst; do
   [[ -f $pkg ]] || continue
   if ! pacman -Qip "$pkg" &>/dev/null; then
     echo "  ERROR: Package structure invalid: $(basename "$pkg")"
     failed=$((failed + 1))
+  else
+    echo "  ✓ $(basename "$pkg")"
   fi
 done
 
@@ -179,18 +190,18 @@ mkdir -p output
 
 # Copy requested packages to output
 echo ""
-echo "==> Copying packages..."
+echo "==> Preparing packages for promotion..."
 copied=()
+copied_files=()
 for pkg_name in $PACKAGES; do
   found=false
   for file in src/*.pkg.tar.zst; do
     [[ -f $file ]] || continue
     base=$(pkgbase "$(basename "$file")")
     if [[ $base == "$pkg_name" ]]; then
-      echo "  Copying: $(basename "$file")"
-      cp "$file" output/
-      [[ -f "${file}.sig" ]] && cp "${file}.sig" output/
-      copied+=("$(basename "$file")")
+      echo "  Ready to promote: $(basename "$file")"
+      copied+=("$pkg_name")
+      copied_files+=("$(basename "$file")")
       found=true
     fi
   done
@@ -202,63 +213,89 @@ done
 
 if [[ ${#copied[@]} -eq 0 ]]; then
   echo ""
-  echo "No packages copied. Exiting."
+  echo "No packages to promote. Exiting."
   exit 0
 fi
 
-# Copy all existing destination packages (except ones being replaced)
+# Check if destination database exists, or if we need to create fresh
 echo ""
-echo "==> Merging with existing $TO_CHANNEL packages..."
-for file in dest/*.pkg.tar.zst; do
-  [[ -f $file ]] || continue
-  base=$(pkgbase "$(basename "$file")")
+if [[ -f dest/hoopoo.db.tar.zst ]]; then
+  echo "==> Using incremental database update (FAST MODE)..."
+  echo "  Existing database found, will append new packages"
   
-  # Check if this package is being replaced
-  skip=false
-  for copied_file in "${copied[@]}"; do
-    copied_base=$(pkgbase "$copied_file")
-    if [[ $base == "$copied_base" ]]; then
-      skip=true
-      echo "  Replacing: $(basename "$file") -> $copied_file"
-      break
+  # Copy existing database to output
+  mkdir -p output
+  cp dest/hoopoo.db.tar.zst output/
+  cp dest/hoopoo.files.tar.zst output/
+  
+  # Copy new packages to output
+  for file in src/*.pkg.tar.zst; do
+    [[ -f $file ]] || continue
+    cp "$file" output/
+    [[ -f "${file}.sig" ]] && cp "${file}.sig" output/
+  done
+  
+  # Incrementally add new packages to existing database
+  cd output
+  shopt -s nullglob
+  new_pkgs=()
+  for file in "${copied_files[@]}"; do
+    if [[ -f $file ]]; then
+      new_pkgs+=("$file")
     fi
   done
   
-  if ! $skip; then
-    cp "$file" output/ 2>/dev/null || true
-    [[ -f "${file}.sig" ]] && cp "${file}.sig" output/ 2>/dev/null || true
+  if (( ${#new_pkgs[@]} > 0 )); then
+    echo "  Appending ${#new_pkgs[@]} package(s) to database..."
+    repo-add hoopoo.db.tar.zst "${new_pkgs[@]}"
+    
+    # Count total packages in database
+    total=$(tar -tf hoopoo.db.tar.zst 2>/dev/null | grep -c '/$' || echo 0)
+    echo "  Database now has $total packages total"
   fi
-done
-
-# Generate repository database with ALL packages
-echo ""
-echo "==> Generating repository database..."
-cd output
-shopt -s nullglob
-pkgs=(*.pkg.tar.zst)
-if (( ${#pkgs[@]} == 0 )); then
-  echo "Error: No packages in output directory!"
-  exit 1
+  
+else
+  echo "==> Creating fresh database (no existing database found)..."
+  
+  # No existing database, create fresh
+  mkdir -p output
+  for file in src/*.pkg.tar.zst; do
+    [[ -f $file ]] || continue
+    cp "$file" output/
+    [[ -f "${file}.sig" ]] && cp "${file}.sig" output/
+  done
+  
+  cd output
+  shopt -s nullglob
+  pkgs=(*.pkg.tar.zst)
+  if (( ${#pkgs[@]} == 0 )); then
+    echo "Error: No packages in output directory!"
+    exit 1
+  fi
+  
+  repo-add hoopoo.db.tar.zst "${pkgs[@]}"
+  echo "  Database created with ${#pkgs[@]} packages"
 fi
-
-repo-add hoopoo.db.tar.zst "${pkgs[@]}"
-echo "Database created with ${#pkgs[@]} packages"
 
 # Upload to R2
 echo ""
 echo "==> Uploading to R2 ($TO_CHANNEL)..."
 
-# Upload packages and signatures (skip existing)
+# Upload ONLY new packages and signatures (skip existing - immutable files)
+echo "  Uploading new package files..."
 rclone copy . "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
   --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
   --s3-no-check-bucket --transfers 8 --ignore-existing --progress
 
-# Upload database files (overwrite)
+# Upload database files (overwrite - these always change)
+echo "  Uploading updated database..."
 rclone copy . "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
   --include "hoopoo.db*" --include "hoopoo.files*" \
   --copy-links --s3-no-check-bucket --progress
 
 echo ""
 echo "✓ Copy complete!"
-echo "  Copied: ${copied[*]}"
+echo "  Promoted: ${copied[*]}"
 echo "  Destination: pkgs.hoopoo.net/$TO_CHANNEL/x86_64/"
+echo ""
+echo "Note: Existing packages remain in R2. Only new packages and database were uploaded."
