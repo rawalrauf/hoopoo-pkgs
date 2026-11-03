@@ -293,7 +293,9 @@ rclone copy . "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
 # Upload database files (overwrite - these always change)
 echo "  Uploading updated database..."
 rclone copy . "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
-  --include "hoopoo.db*" --include "hoopoo.files*" \
+  --include "hoopoo.db.tar.zst" --include "hoopoo.db" \
+  --include "hoopoo.files.tar.zst" --include "hoopoo.files" \
+  --exclude "*.old" --exclude "*.gz" \
   --copy-links --s3-no-check-bucket --progress
 
 echo ""
