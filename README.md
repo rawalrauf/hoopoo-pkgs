@@ -33,7 +33,7 @@ Server = https://pkgs.hoopoo.net/edge/$arch
 **Channels:** `edge` → `stable`
 
 - **`edge`** — Latest versions, built automatically on push or upstream update. Testing ground for new packages and updates.
-- **`stable`** — Production-ready packages, manually promoted from edge after thorough testing.
+- **`stable`** — Production-ready packages, promoted from edge automatically after 14 days or manually when needed.
 
 Packages build once against edge, and the same file is promoted to stable. A published filename never changes its bytes.
 
@@ -42,16 +42,25 @@ Packages build once against edge, and the same file is promoted to stable. A pub
 ```
 PR merge or upstream update
   └─ publish.yml       build package, sign with GPG, publish to edge for testing
-Manual promotion (after testing)
-  └─ copy-packages.yml copy tested packages from edge to stable
+
+After 14 days in edge (automatic)
+  └─ sync.yml          auto-promote aged packages to stable
+
+Manual promotion (when needed)
+  └─ copy-packages.yml copy specific packages from edge to stable
 ```
 
-To ship a change:
-1. Update PKGBUILD in a PR or let upstream sync do it automatically
-2. Merge to `edge` branch (or sync workflow commits automatically)
-3. Package builds and publishes to `edge` within minutes
-4. Test the package on `edge`
-5. Manually promote to `stable` when tested and ready
+**Promotion workflow:**
+1. Package is updated in PKGBUILD or by upstream sync
+2. Package builds and publishes to `edge` within minutes
+3. Package is tested on `edge` by early adopters
+4. After 14 days, package auto-promotes to `stable` (unless issues found)
+5. Manual promotion available anytime for critical fixes or verified packages
+
+**Auto-promotion rules:**
+- Packages in `edge` for 14+ days automatically promote to `stable`
+- Packages just updated by upstream sync are excluded from auto-promotion (get fresh 14-day window)
+- Auto-promotion runs every 6 hours alongside upstream sync
 
 ## Contributing a package
 
@@ -152,7 +161,7 @@ To ship a change:
 
 ### Promote packages to stable
 
-When packages in `edge` have been tested and are ready for production:
+Packages automatically promote from `edge` to `stable` after 14 days. For manual promotion (critical fixes, verified packages):
 
 ```bash
 gh workflow run copy-packages.yml \
@@ -162,6 +171,8 @@ gh workflow run copy-packages.yml \
 ```
 
 This copies the validated packages from edge to stable with full verification (SHA256 + GPG + pacman structure checks).
+
+**Note:** Manual promotion is rarely needed. The 14-day auto-promotion provides a reliable testing window while ensuring packages reach users automatically.
 
 ### Republish a package
 
