@@ -60,9 +60,44 @@ jobs:
             echo "All packages up to date"
           fi
 
-  promote:
+  check-aged:
+    runs-on: ubuntu-latest
     needs: sync
-    if: needs.sync.outputs.has_changes == 'true'
+    outputs:
+      aged_packages: ${{ steps.check.outputs.aged_packages }}
+      has_aged: ${{ steps.check.outputs.has_aged }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: edge
+
+      - name: Install rclone and jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rclone jq
+
+      - name: Check for aged packages
+        id: check
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          # Pass upstream changed packages to exclude them from aged check
+          bash bin/check-aged-packages.sh "${{ needs.sync.outputs.changed_packages }}"
+          
+          # Set has_aged flag
+          if [[ -n "$(grep 'aged_packages=' $GITHUB_OUTPUT | cut -d= -f2)" ]]; then
+            echo "has_aged=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_aged=false" >> $GITHUB_OUTPUT
+          fi
+
+  promote:
+    needs: [sync, check-aged]
+    if: needs.sync.outputs.has_changes == 'true' || needs.check-aged.outputs.has_aged == 'true'
     runs-on: ubuntu-latest
     container:
       image: archlinux/archlinux:latest
@@ -97,13 +132,24 @@ jobs:
           RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
         run: |
+          # Combine upstream changed packages and aged packages
+          ALL_PACKAGES="${{ needs.sync.outputs.changed_packages }} ${{ needs.check-aged.outputs.aged_packages }}"
+          # Remove duplicates and extra spaces
+          UNIQUE_PACKAGES=$(echo "$ALL_PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ' | xargs)
+          
+          if [[ -z "$UNIQUE_PACKAGES" ]]; then
+            echo "No packages to promote"
+            exit 0
+          fi
+          
+          echo "Promoting packages: $UNIQUE_PACKAGES"
           bash bin/r2-copy-packages.sh \
-            --packages "${{ needs.sync.outputs.changed_packages }}" \
+            --packages "$UNIQUE_PACKAGES" \
             --from edge \
             --to stable
 
   build-edge:
-    needs: [sync, promote]
+    needs: [sync, check-aged, promote]
     if: needs.sync.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     steps:
