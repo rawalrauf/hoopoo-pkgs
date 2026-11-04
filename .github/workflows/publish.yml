@@ -145,9 +145,12 @@ jobs:
 
       - name: Build packages
         run: |
-          mkdir -p new-packages
+          mkdir -p new-packages built-packages
           built=0
           skipped=0
+          
+          # When packages are explicitly specified, force rebuild them
+          FORCE_BUILD="${{ github.event.inputs.packages }}"
 
           for pkg in ${{ steps.packages.outputs.list }}; do
             [[ -d pkgbuilds/$pkg ]] || continue
@@ -163,8 +166,8 @@ jobs:
               arch="x86_64"
             fi
 
-            # Check if already exists
-            if [[ -n $pkgver && -n $pkgname && -n $arch ]]; then
+            # Check if already exists (skip only if not explicitly requested)
+            if [[ -z "$FORCE_BUILD" && -n $pkgver && -n $pkgname && -n $arch ]]; then
               encoded_ver="${pkgver//:/.}"
               encoded_ver="${encoded_ver//+/.2B}"
               expected_file="${pkgname}-${encoded_ver}-${arch}.pkg.tar.zst"
@@ -187,7 +190,9 @@ jobs:
               continue
             }
             
+            # Copy to both directories to track what was actually built
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/new-packages/ 2>/dev/null || true
+            cp *.pkg.tar.zst $GITHUB_WORKSPACE/built-packages/ 2>/dev/null || true
             built=$(( built + 1 ))
             cd $GITHUB_WORKSPACE
           done
@@ -306,19 +311,19 @@ jobs:
           echo "==> Identifying rebuilt packages..."
           declare -A rebuilt_bases
           shopt -s nullglob
-          for pkg in *.pkg.tar.zst; do
-            # Extract package base from database
-            base=$(tar -xOf hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
-              awk -v file="$pkg" '
-                $0 == "%FILENAME%" { getline filename }
-                $0 == "%BASE%" { getline base }
-                filename == file && base != "" { print base; exit }
-              ')
-            if [[ -n "$base" ]]; then
-              rebuilt_bases["$base"]=1
-              echo "  Will clean up old versions of: $base"
-            fi
+          
+          # Use built-packages directory to identify what was actually built
+          cd "$GITHUB_WORKSPACE/built-packages"
+          for pkg in *.pkg.tar.zst 2>/dev/null; do
+            [[ -f "$pkg" ]] || continue
+            # Extract base name by removing version-release-arch
+            base="${pkg%.pkg.tar.zst}"
+            base=$(echo "$base" | sed -E 's/-[0-9]+:?[0-9.]+.*-[0-9]+-[^-]+$//')
+            rebuilt_bases["$base"]=1
+            echo "  Will clean up old versions of: $base"
           done
+          
+          cd "$GITHUB_WORKSPACE/new-packages"
           
           # Delete old versions from R2 using database filenames
           if [[ ${#rebuilt_bases[@]} -gt 0 ]]; then
