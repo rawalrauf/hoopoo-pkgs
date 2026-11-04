@@ -302,19 +302,71 @@ jobs:
           CHANNEL="${{ steps.channel.outputs.name }}"
           cd new-packages
           
-          # Upload packages and signatures (skip existing, immutable)
+          # Extract package base names from packages in new-packages
+          echo "==> Identifying rebuilt packages..."
+          declare -A rebuilt_bases
+          shopt -s nullglob
+          for pkg in *.pkg.tar.zst; do
+            # Extract package base from database
+            base=$(tar -xOf hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
+              awk -v file="$pkg" '
+                $0 == "%FILENAME%" { getline filename }
+                $0 == "%BASE%" { getline base }
+                filename == file && base != "" { print base; exit }
+              ')
+            if [[ -n "$base" ]]; then
+              rebuilt_bases["$base"]=1
+              echo "  Will clean up old versions of: $base"
+            fi
+          done
+          
+          # Delete old versions from R2 using database filenames
+          if [[ ${#rebuilt_bases[@]} -gt 0 ]]; then
+            echo ""
+            echo "==> Downloading existing database to find old versions..."
+            mkdir -p /tmp/old-db
+            if rclone copy r2:hoopoo-pkgs/$CHANNEL/x86_64/ /tmp/old-db/ \
+                 --include "hoopoo.db.tar.zst" \
+                 --s3-no-check-bucket 2>/dev/null && [[ -f /tmp/old-db/hoopoo.db.tar.zst ]]; then
+              
+              echo "==> Deleting old versions from R2..."
+              for base in "${!rebuilt_bases[@]}"; do
+                echo "  Removing old versions of: $base"
+                # Extract filenames for this base from old database
+                tar -xOf /tmp/old-db/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
+                  awk -v base="$base" '
+                    $0 == "%BASE%" { getline pkgbase }
+                    $0 == "%FILENAME%" { getline filename }
+                    pkgbase == base && filename != "" { print filename; filename="" }
+                  ' | while IFS= read -r filename; do
+                    [[ -n "$filename" ]] || continue
+                    echo "    Deleting: $filename"
+                    rclone deletefile r2:hoopoo-pkgs/$CHANNEL/x86_64/$filename --s3-no-check-bucket 2>/dev/null || true
+                    rclone deletefile r2:hoopoo-pkgs/$CHANNEL/x86_64/$filename.sig --s3-no-check-bucket 2>/dev/null || true
+                  done
+              done
+            else
+              echo "  No existing database found, skipping cleanup"
+            fi
+          fi
+          
+          # Upload packages and signatures
+          echo ""
+          echo "==> Uploading new packages..."
           rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
             --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
-            --s3-no-check-bucket --transfers 8 --ignore-existing
+            --s3-no-check-bucket --transfers 8
           
           # Upload database files (overwrite, these change)
+          echo "==> Uploading database..."
           rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
             --include "hoopoo.db.tar.zst" --include "hoopoo.db" \
             --include "hoopoo.files.tar.zst" --include "hoopoo.files" \
             --exclude "*.old" --exclude "*.gz" \
             --copy-links --s3-no-check-bucket
           
-          echo "Published to pkgs.hoopoo.net/$CHANNEL/x86_64/"
+          echo ""
+          echo "✓ Published to pkgs.hoopoo.net/$CHANNEL/x86_64/"
 
       - name: Verify upload
         if: env.nothing_to_publish != 'true'
