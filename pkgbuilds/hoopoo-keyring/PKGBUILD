@@ -1,14 +1,14 @@
 # Maintainer: Hoopoo
 pkgname=hoopoo-keyring
 pkgver=1.0.0
-pkgrel=4
+pkgrel=5
 pkgdesc='Hoopoo Linux PGP keyring'
 arch=('any')
 url='https://github.com/rawalrauf/hoopoo-pkgs'
 license=('GPL-3.0-or-later')
 source=('hoopoo.gpg'
         'hoopoo-trusted')
-sha256sums=('0b2f3e0692ff4cfb4f51301de659ffcda6c6bb804bed10ab9c2a51229c929767'
+sha256sums=('97027da1ec146b0b15e03b9555fd2ff8c161b5da531dbc5291168d017a41ec61'
             'SKIP')
 
 package() {
