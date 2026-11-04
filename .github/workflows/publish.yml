@@ -314,7 +314,7 @@ jobs:
           
           # Use built-packages directory to identify what was actually built
           cd "$GITHUB_WORKSPACE/built-packages"
-          for pkg in *.pkg.tar.zst 2>/dev/null; do
+          for pkg in *.pkg.tar.zst; do
             [[ -f "$pkg" ]] || continue
             # Extract base name by removing version-release-arch
             base="${pkg%.pkg.tar.zst}"
