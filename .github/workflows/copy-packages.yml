@@ -39,15 +39,12 @@ jobs:
 
       - name: Import Hoopoo GPG key
         run: |
-          # Import the public key for verification
-          curl -sL https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1.0.0-4-any.pkg.tar.zst -o /tmp/hoopoo-keyring.pkg.tar.zst
-          pacman -U --noconfirm /tmp/hoopoo-keyring.pkg.tar.zst || true
-          pacman-key --init
-          pacman-key --populate hoopoo || true
+          # Import the new public key from keyservers
+          gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys D3931CBE26A484582489EEB7394AFBE6E502DB8F || \
+          gpg --keyserver hkps://keys.openpgp.org --recv-keys D3931CBE26A484582489EEB7394AFBE6E502DB8F || true
           
-          # Also import directly from keyserver as backup
-          gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD || \
-          gpg --keyserver hkps://keys.openpgp.org --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD || true
+          # Verify key was imported
+          gpg --list-keys D3931CBE26A484582489EEB7394AFBE6E502DB8F
 
       - name: Copy packages via R2
         run: |
