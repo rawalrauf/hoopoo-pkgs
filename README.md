@@ -7,9 +7,9 @@ Pacman repository for Hoopoo Linux — packages not available in standard Arch r
 First install the keyring to trust Hoopoo packages:
 
 ```bash
-sudo pacman-key --recv-keys 070030E5D914817BA797F66AAF1C8F036A5E73FD --keyserver keyserver.ubuntu.com
-sudo pacman-key --lsign-key 070030E5D914817BA797F66AAF1C8F036A5E73FD
-sudo pacman -U https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1-1-any.pkg.tar.zst
+sudo pacman-key --recv-keys D3931CBE26A484582489EEB7394AFBE6E502DB8F --keyserver keyserver.ubuntu.com
+sudo pacman-key --lsign-key D3931CBE26A484582489EEB7394AFBE6E502DB8F
+sudo pacman -U https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1.0.0-6-any.pkg.tar.zst
 ```
 
 Then add to `/etc/pacman.conf`:
@@ -202,7 +202,7 @@ This removes the package from the databases, deletes the package files from R2 s
 - **Hosting:** Cloudflare R2 (object storage)
 - **Domain:** `pkgs.hoopoo.net` with custom Cloudflare Worker
 - **CDN:** Cloudflare global edge network
-- **Signing:** GPG key `070030E5D914817BA797F66AAF1C8F036A5E73FD`
+- **Signing:** GPG key `D3931CBE26A484582489EEB7394AFBE6E502DB8F` (pkgs@hoopoo.net)
 - **CI/CD:** GitHub Actions
 - **Architecture:** x86_64 only
 
