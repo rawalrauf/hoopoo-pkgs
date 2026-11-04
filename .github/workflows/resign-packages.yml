@@ -1,0 +1,188 @@
+name: Re-sign All Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel to re-sign (edge or stable)'
+        required: true
+        default: 'edge'
+        type: choice
+        options:
+          - edge
+          - stable
+
+jobs:
+  resign:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    environment: publish
+    permissions:
+      contents: read
+
+    steps:
+      - name: Setup environment
+        run: |
+          pacman -Sy --noconfirm gnupg curl unzip
+
+      - name: Import new GPG key
+        run: |
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          echo "allow-preset-passphrase" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys | grep Keygrip | head -1 | awk '{print $3}')
+          if [[ -n $KEYGRIP ]]; then
+            /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE" 2>/dev/null || true
+          fi
+          
+          # Verify key was imported
+          gpg --list-keys
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Install rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o rclone.zip
+          unzip -jq rclone.zip '*/rclone'
+          chmod +x rclone
+          mv rclone /usr/local/bin/
+          rclone version
+
+      - name: Download packages from R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          mkdir -p packages
+          echo "==> Downloading packages from $CHANNEL channel..."
+          rclone sync "r2:hoopoo-pkgs/$CHANNEL/x86_64/" packages/ \
+            --progress \
+            --transfers=8 \
+            --s3-no-check-bucket
+          
+          PKG_COUNT=$(find packages -name "*.pkg.tar.zst" -type f | wc -l)
+          echo "Downloaded $PKG_COUNT packages"
+          ls -lh packages/ | head -20
+
+      - name: Remove old signatures and databases
+        run: |
+          echo "==> Removing old signatures..."
+          rm -f packages/*.sig
+          echo "==> Removing old database files..."
+          rm -f packages/hoopoo.db*
+          rm -f packages/hoopoo.files*
+
+      - name: Re-sign all packages
+        run: |
+          echo "==> Signing packages with new key..."
+          cd packages
+          signed=0
+          for pkg in *.pkg.tar.zst; do
+            [[ -f "$pkg" ]] || continue
+            echo "  Signing: $pkg"
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase "$GPG_PASSPHRASE" \
+              --detach-sign --no-armor "$pkg"
+            signed=$((signed + 1))
+          done
+          echo "Signed $signed packages"
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Verify signatures
+        run: |
+          echo "==> Verifying signatures..."
+          cd packages
+          failed=0
+          verified=0
+          for pkg in *.pkg.tar.zst; do
+            [[ -f "$pkg" ]] || continue
+            if gpg --batch --verify "${pkg}.sig" "$pkg" 2>/dev/null; then
+              verified=$((verified + 1))
+            else
+              echo "  ERROR: Invalid signature for $pkg"
+              failed=$((failed + 1))
+            fi
+          done
+          echo "Verified: $verified, Failed: $failed"
+          if (( failed > 0 )); then
+            echo "ERROR: $failed package(s) failed signature verification"
+            exit 1
+          fi
+          echo "✓ All packages have valid signatures"
+
+      - name: Regenerate database
+        run: |
+          echo "==> Regenerating package database..."
+          cd packages
+          
+          # Get the key ID
+          KEY_ID=$(gpg --list-keys --keyid-format LONG | grep ^pub | head -1 | awk '{print $2}' | cut -d/ -f2)
+          echo "Using key ID: $KEY_ID"
+          
+          # Create database
+          repo-add -s -k "$KEY_ID" hoopoo.db.tar.zst *.pkg.tar.zst
+          
+          # Create symlinks
+          ln -sf hoopoo.db.tar.zst hoopoo.db
+          ln -sf hoopoo.files.tar.zst hoopoo.files
+          
+          # Verify database was created
+          if [[ ! -f hoopoo.db.tar.zst ]]; then
+            echo "ERROR: Failed to create database"
+            exit 1
+          fi
+          
+          echo "✓ Database created"
+          ls -lh hoopoo.*
+
+      - name: Upload to R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          echo "==> Uploading to R2 $CHANNEL channel..."
+          cd packages
+          
+          # Upload everything (packages, signatures, databases)
+          rclone sync . "r2:hoopoo-pkgs/$CHANNEL/x86_64/" \
+            --progress \
+            --transfers=8 \
+            --s3-no-check-bucket \
+            --exclude "*.old" \
+            --exclude "*.gz"
+          
+          echo "✓ Upload complete"
+
+      - name: Verify upload
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          echo "==> Verifying pkgs.hoopoo.net/$CHANNEL/x86_64/hoopoo.db exists..."
+          sleep 5
+          curl -fsSL --retry 3 "https://pkgs.hoopoo.net/$CHANNEL/x86_64/hoopoo.db" > /dev/null && \
+            echo "✓ Database is live at pkgs.hoopoo.net/$CHANNEL/x86_64/" || \
+            echo "⚠ Database not yet available (may take a moment to propagate)"
+
+      - name: Summary
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          echo ""
+          echo "=== Re-signing Complete ==="
+          echo "Channel: $CHANNEL"
+          echo "All packages have been re-signed with new key"
+          echo "Key email: pkgs@hoopoo.net"
+          echo ""
+          echo "Next steps:"
+          echo "1. Test package installation from $CHANNEL channel"
+          echo "2. If successful, run for other channel"
+          echo "3. Delete old GPG key from your system"
