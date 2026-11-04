@@ -340,9 +340,13 @@ jobs:
                 # Extract filenames for this base from old database
                 tar -xOf /tmp/old-db/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
                   awk -v base="$base" '
-                    $0 == "%BASE%" { getline pkgbase }
-                    $0 == "%FILENAME%" { getline filename }
-                    pkgbase == base && filename != "" { print filename; filename="" }
+                    $0 == "%FILENAME%" { getline; current_file = $0 }
+                    $0 == "%BASE%" { getline; current_base = $0 }
+                    $0 == "" && current_base == base && current_file != "" {
+                      print current_file
+                      current_file = ""
+                      current_base = ""
+                    }
                   ' | while IFS= read -r filename; do
                     [[ -n "$filename" ]] || continue
                     echo "    Deleting: $filename"
