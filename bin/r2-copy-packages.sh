@@ -284,11 +284,21 @@ fi
 echo ""
 echo "==> Uploading to R2 ($TO_CHANNEL)..."
 
-# Upload ONLY new packages and signatures (skip existing - immutable files)
+# Delete old versions of packages being promoted
+echo "  Removing old versions from R2..."
+for pkg_name in "${requested_found[@]}"; do
+  # List all versions of this package in R2 and delete them
+  echo "    Cleaning up old versions of: $pkg_name"
+  rclone delete "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
+    --include "$pkg_name-*.pkg.tar.zst" --include "$pkg_name-*.pkg.tar.zst.sig" \
+    --s3-no-check-bucket 2>/dev/null || true
+done
+
+# Upload new packages and signatures
 echo "  Uploading new package files..."
 rclone copy . "r2:hoopoo-pkgs/$TO_CHANNEL/x86_64/" \
   --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
-  --s3-no-check-bucket --transfers 8 --ignore-existing --progress
+  --s3-no-check-bucket --transfers 8 --progress
 
 # Upload database files (overwrite - these always change)
 echo "  Uploading updated database..."
