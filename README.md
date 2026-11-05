@@ -1,6 +1,6 @@
 # Hoopoo Package Repository
 
-Pacman repository for Hoopoo Linux — packages not available in standard Arch repos.
+Pacman repository for Hoopoo — packages not available in standard Arch repos.
 
 ## Add to pacman
 
@@ -9,7 +9,7 @@ First install the keyring to trust Hoopoo packages:
 ```bash
 sudo pacman-key --recv-keys D3931CBE26A484582489EEB7394AFBE6E502DB8F --keyserver keyserver.ubuntu.com
 sudo pacman-key --lsign-key D3931CBE26A484582489EEB7394AFBE6E502DB8F
-sudo pacman -U https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1.0.0-6-any.pkg.tar.zst
+sudo pacman -U https://pkgs.hoopoo.net/stable/x86_64/hoopoo-keyring-1.0.0-13-any.pkg.tar.zst
 ```
 
 Then add to `/etc/pacman.conf`:
@@ -204,7 +204,8 @@ This removes the package from the databases, deletes the package files from R2 s
 - **CDN:** Cloudflare global edge network
 - **Signing:** GPG key `D3931CBE26A484582489EEB7394AFBE6E502DB8F` (pkgs@hoopoo.net)
 - **CI/CD:** GitHub Actions
-- **Architecture:** x86_64 only
+- **Architecture:** x86_64
+- **Package count:** 78 packages (as of 2026-11-05)
 
 ### Verification
 
@@ -214,3 +215,7 @@ All packages are verified at multiple stages:
 3. **Pacman structure validation** (`pacman -Qip`)
 
 This three-layer verification ensures package integrity throughout the pipeline.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned improvements.
