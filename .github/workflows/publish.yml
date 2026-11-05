@@ -190,7 +190,28 @@ jobs:
               continue
             }
             
-            # Copy to both directories to track what was actually built
+            # Before copying, remove old versions from new-packages
+            # Extract package base from each built package
+            for built_pkg in *.pkg.tar.zst; do
+              [[ -f "$built_pkg" ]] || continue
+              
+              # Extract base name by removing version-release-arch
+              base="${built_pkg%.pkg.tar.zst}"
+              base=$(echo "$base" | sed -E 's/-[0-9]+:?[0-9.]+.*-[0-9]+-[^-]+$//')
+              
+              echo "  Removing old versions of base '$base' from new-packages/"
+              # Remove any existing packages with this base from new-packages
+              cd $GITHUB_WORKSPACE/new-packages
+              shopt -s nullglob
+              for old_pkg in ${base}-*.pkg.tar.zst; do
+                [[ -f "$old_pkg" ]] || continue
+                echo "    Removing: $old_pkg"
+                rm -f "$old_pkg" "$old_pkg.sig"
+              done
+              cd /tmp/build-$pkg
+            done
+            
+            # Now copy newly built packages to both directories
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/new-packages/ 2>/dev/null || true
             cp *.pkg.tar.zst $GITHUB_WORKSPACE/built-packages/ 2>/dev/null || true
             built=$(( built + 1 ))
