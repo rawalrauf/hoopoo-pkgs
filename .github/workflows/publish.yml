@@ -190,7 +190,7 @@ jobs:
               continue
             }
             
-            # Remove old versions from repo/ to prevent re-copying later
+            # Remove old versions from repo/ and track for R2 deletion
             for built_pkg in *.pkg.tar.zst; do
               [[ -f "$built_pkg" ]] || continue
               
@@ -204,6 +204,8 @@ jobs:
               for old_pkg in ${base}-*.pkg.tar.zst; do
                 [[ -f "$old_pkg" ]] || continue
                 echo "    Removing: $old_pkg"
+                # Track filename for R2 deletion later
+                echo "$old_pkg" >> $GITHUB_WORKSPACE/files-to-delete.txt
                 rm -f "$old_pkg" "$old_pkg.sig"
               done
               cd /tmp/build-$pkg
@@ -326,60 +328,19 @@ jobs:
           CHANNEL="${{ steps.channel.outputs.name }}"
           cd new-packages
           
-          # Extract package base names from packages in new-packages
-          echo "==> Identifying rebuilt packages..."
-          declare -A rebuilt_bases
-          shopt -s nullglob
-          
-          # Use built-packages directory to identify what was actually built
-          cd "$GITHUB_WORKSPACE/built-packages"
-          for pkg in *.pkg.tar.zst; do
-            [[ -f "$pkg" ]] || continue
-            # Extract base name by removing version-release-arch
-            base="${pkg%.pkg.tar.zst}"
-            base=$(echo "$base" | sed -E 's/-[0-9]+:?[0-9.]+.*-[0-9]+-[^-]+$//')
-            rebuilt_bases["$base"]=1
-            echo "  Will clean up old versions of: $base"
-          done
-          
-          cd "$GITHUB_WORKSPACE/new-packages"
-          
-          # Delete old versions from R2 using database filenames
-          if [[ ${#rebuilt_bases[@]} -gt 0 ]]; then
+          # Delete old versions from R2 using tracked filenames
+          if [[ -f $GITHUB_WORKSPACE/files-to-delete.txt ]]; then
+            echo "==> Deleting old versions from R2..."
+            while IFS= read -r filename; do
+              [[ -n "$filename" ]] || continue
+              echo "  Deleting: $filename"
+              rclone deletefile r2:hoopoo-pkgs/$CHANNEL/x86_64/$filename --s3-no-check-bucket 2>/dev/null || true
+              rclone deletefile r2:hoopoo-pkgs/$CHANNEL/x86_64/$filename.sig --s3-no-check-bucket 2>/dev/null || true
+            done < $GITHUB_WORKSPACE/files-to-delete.txt
             echo ""
-            echo "==> Downloading existing database to find old versions..."
-            mkdir -p /tmp/old-db
-            if rclone copy r2:hoopoo-pkgs/$CHANNEL/x86_64/ /tmp/old-db/ \
-                 --include "hoopoo.db.tar.zst" \
-                 --s3-no-check-bucket 2>/dev/null && [[ -f /tmp/old-db/hoopoo.db.tar.zst ]]; then
-              
-              echo "==> Deleting old versions from R2..."
-              for base in "${!rebuilt_bases[@]}"; do
-                echo "  Removing old versions of: $base"
-                # Extract filenames for this base from old database
-                tar -xOf /tmp/old-db/hoopoo.db.tar.zst --wildcards '*/desc' 2>/dev/null | \
-                  awk -v base="$base" '
-                    $0 == "%FILENAME%" { getline; current_file = $0 }
-                    $0 == "%BASE%" { getline; current_base = $0 }
-                    $0 == "" && current_base == base && current_file != "" {
-                      print current_file
-                      current_file = ""
-                      current_base = ""
-                    }
-                  ' | while IFS= read -r filename; do
-                    [[ -n "$filename" ]] || continue
-                    echo "    Deleting: $filename"
-                    rclone deletefile r2:hoopoo-pkgs/$CHANNEL/x86_64/$filename --s3-no-check-bucket 2>/dev/null || true
-                    rclone deletefile r2:hoopoo-pkgs/$CHANNEL/x86_64/$filename.sig --s3-no-check-bucket 2>/dev/null || true
-                  done
-              done
-            else
-              echo "  No existing database found, skipping cleanup"
-            fi
           fi
           
           # Upload packages and signatures
-          echo ""
           echo "==> Uploading new packages..."
           rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
             --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
