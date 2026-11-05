@@ -2,6 +2,8 @@
 
 Pacman repository for Hoopoo — packages not available in standard Arch repos.
 
+See `plans/` for future improvements and feature plans.
+
 ## Add to pacman
 
 First install the keyring to trust Hoopoo packages:
@@ -205,7 +207,6 @@ This removes the package from the databases, deletes the package files from R2 s
 - **Signing:** GPG key `D3931CBE26A484582489EEB7394AFBE6E502DB8F` (pkgs@hoopoo.net)
 - **CI/CD:** GitHub Actions
 - **Architecture:** x86_64
-- **Package count:** 78 packages (as of 2026-11-05)
 
 ### Verification
 
@@ -215,7 +216,3 @@ All packages are verified at multiple stages:
 3. **Pacman structure validation** (`pacman -Qip`)
 
 This three-layer verification ensures package integrity throughout the pipeline.
-
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for planned improvements.
