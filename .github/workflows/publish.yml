@@ -340,11 +340,19 @@ jobs:
             echo ""
           fi
           
-          # Upload packages and signatures
-          echo "==> Uploading new packages..."
-          rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
-            --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
-            --s3-no-check-bucket --transfers 8
+          # Upload only newly built packages (preserves timestamps of unchanged packages)
+          echo "==> Uploading newly built packages..."
+          cd $GITHUB_WORKSPACE/built-packages
+          if ls *.pkg.tar.zst &>/dev/null; then
+            rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
+              --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
+              --s3-no-check-bucket --transfers 8
+            echo "  Uploaded $(ls -1 *.pkg.tar.zst | wc -l) package(s)"
+          else
+            echo "  No packages to upload"
+          fi
+          
+          cd $GITHUB_WORKSPACE/new-packages
           
           # Upload database files (overwrite, these change)
           echo "==> Uploading database..."
