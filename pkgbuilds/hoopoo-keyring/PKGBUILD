@@ -1,8 +1,8 @@
 # Maintainer: Hoopoo
 pkgname=hoopoo-keyring
 pkgver=1.0.0
-pkgrel=12
-pkgdesc='Hoopoo Linux PGP keyring'
+pkgrel=13
+pkgdesc='Hoopoo PGP keyring'
 arch=('any')
 url='https://github.com/rawalrauf/hoopoo-pkgs'
 license=('GPL-3.0-or-later')
