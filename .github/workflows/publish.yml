@@ -340,14 +340,29 @@ jobs:
             echo ""
           fi
           
-          # Upload only newly built packages (preserves timestamps of unchanged packages)
+          # Upload only newly built packages with their signatures (preserves timestamps of unchanged packages)
           echo "==> Uploading newly built packages..."
+          mkdir -p $GITHUB_WORKSPACE/upload-packages
           cd $GITHUB_WORKSPACE/built-packages
           if ls *.pkg.tar.zst &>/dev/null; then
+            for pkg in *.pkg.tar.zst; do
+              [[ -f $pkg ]] || continue
+              # Copy both package and signature from new-packages
+              if [[ -f $GITHUB_WORKSPACE/new-packages/$pkg ]]; then
+                cp "$GITHUB_WORKSPACE/new-packages/$pkg" $GITHUB_WORKSPACE/upload-packages/
+              fi
+              if [[ -f $GITHUB_WORKSPACE/new-packages/$pkg.sig ]]; then
+                cp "$GITHUB_WORKSPACE/new-packages/$pkg.sig" $GITHUB_WORKSPACE/upload-packages/
+              else
+                echo "  WARNING: No signature for $pkg"
+              fi
+            done
+            
+            cd $GITHUB_WORKSPACE/upload-packages
             rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
               --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
               --s3-no-check-bucket --transfers 8
-            echo "  Uploaded $(ls -1 *.pkg.tar.zst | wc -l) package(s)"
+            echo "  Uploaded $(ls -1 *.pkg.tar.zst 2>/dev/null | wc -l) package(s)"
           else
             echo "  No packages to upload"
           fi
