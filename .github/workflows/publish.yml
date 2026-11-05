@@ -168,8 +168,8 @@ jobs:
 
             # Check if already exists (skip only if not explicitly requested)
             if [[ -z "$FORCE_BUILD" && -n $pkgver && -n $pkgname && -n $arch ]]; then
-              encoded_ver="${pkgver//:/.}"
-              encoded_ver="${encoded_ver//+/.2B}"
+              # Note: keep colon in epoch, makepkg uses it in filenames
+              encoded_ver="${pkgver//+/.2B}"
               expected_file="${pkgname}-${encoded_ver}-${arch}.pkg.tar.zst"
               if [[ -f repo/$expected_file ]]; then
                 echo "=== Skipping $pkg ($expected_file already in repo) ==="
