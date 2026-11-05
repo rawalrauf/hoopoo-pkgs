@@ -1,0 +1,193 @@
+name: Resign All Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel to resign (edge or stable)'
+        required: true
+        type: choice
+        options:
+          - edge
+          - stable
+
+concurrency:
+  group: resign-${{ github.event.inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  resign:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux/archlinux:latest
+    environment: publish
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          pacman -Sy --noconfirm gnupg curl unzip
+          
+          # Import Hoopoo signing key
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          echo "allow-preset-passphrase" >> ~/.gnupg/gpg-agent.conf
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+          KEYGRIP=$(gpg --with-keygrip --list-secret-keys | grep Keygrip | head -1 | awk '{print $3}')
+          if [[ -n $KEYGRIP ]]; then
+            /usr/lib/gnupg/gpg-preset-passphrase --preset "$KEYGRIP" <<< "$GPG_PASSPHRASE" 2>/dev/null || true
+          fi
+          
+          # Verify key loaded
+          gpg --list-secret-keys
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Install rclone
+        run: |
+          curl -fsSL https://downloads.rclone.org/rclone-current-linux-amd64.zip -o rclone.zip
+          unzip -jq rclone.zip '*/rclone'
+          chmod +x rclone
+          mv rclone /usr/local/bin/
+          rclone version
+
+      - name: Download all packages from R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          mkdir -p packages
+          echo "==> Downloading all packages from $CHANNEL..."
+          rclone copy r2:hoopoo-pkgs/$CHANNEL/x86_64/ packages/ \
+            --include "*.pkg.tar.zst" \
+            --s3-no-check-bucket --transfers 16
+          
+          pkg_count=$(ls -1 packages/*.pkg.tar.zst 2>/dev/null | wc -l)
+          echo "Downloaded $pkg_count packages"
+          
+          if (( pkg_count == 0 )); then
+            echo "ERROR: No packages found!"
+            exit 1
+          fi
+
+      - name: Remove old signatures
+        run: |
+          echo "==> Removing old .sig files from packages/"
+          rm -f packages/*.sig
+          echo "✓ Old signatures removed"
+
+      - name: Sign all packages
+        run: |
+          echo "==> Signing all packages with new key..."
+          signed=0
+          failed=0
+          
+          for pkg in packages/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            echo "  Signing: $(basename $pkg)"
+            if gpg --batch --yes --pinentry-mode loopback \
+                --passphrase "$GPG_PASSPHRASE" \
+                --detach-sign "$pkg"; then
+              signed=$((signed + 1))
+            else
+              echo "  ERROR: Failed to sign $(basename $pkg)"
+              failed=$((failed + 1))
+            fi
+          done
+          
+          echo ""
+          echo "Signed: $signed, Failed: $failed"
+          
+          if (( failed > 0 )); then
+            echo "ERROR: $failed package(s) failed to sign"
+            exit 1
+          fi
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Verify all signatures
+        run: |
+          echo "==> Verifying all signatures..."
+          verified=0
+          failed=0
+          
+          for pkg in packages/*.pkg.tar.zst; do
+            [[ -f $pkg ]] || continue
+            sig="${pkg}.sig"
+            
+            if [[ ! -f $sig ]]; then
+              echo "  ERROR: No signature for $(basename $pkg)"
+              failed=$((failed + 1))
+              continue
+            fi
+            
+            if gpg --batch --verify "$sig" "$pkg" 2>/dev/null; then
+              verified=$((verified + 1))
+            else
+              echo "  ERROR: Invalid signature for $(basename $pkg)"
+              failed=$((failed + 1))
+            fi
+          done
+          
+          echo ""
+          echo "Verified: $verified, Failed: $failed"
+          
+          if (( failed > 0 )); then
+            echo "ERROR: $failed package(s) failed verification"
+            exit 1
+          fi
+          echo "✓ All signatures verified"
+
+      - name: Regenerate repository database
+        run: |
+          pacman -Sy --noconfirm pacman-contrib
+          cd packages
+          echo "==> Creating repository database..."
+          repo-add hoopoo.db.tar.zst *.pkg.tar.zst
+          ln -sf hoopoo.db.tar.zst hoopoo.db
+          ln -sf hoopoo.files.tar.zst hoopoo.files
+          
+          pkg_count=$(ls -1 *.pkg.tar.zst | wc -l)
+          echo "✓ Database created with $pkg_count packages"
+
+      - name: Upload everything to R2
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          cd packages
+          
+          echo "==> Uploading packages and signatures to R2..."
+          rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
+            --include "*.pkg.tar.zst" --include "*.pkg.tar.zst.sig" \
+            --s3-no-check-bucket --transfers 16
+          
+          echo "==> Uploading database..."
+          rclone copy . r2:hoopoo-pkgs/$CHANNEL/x86_64/ \
+            --include "hoopoo.db.tar.zst" --include "hoopoo.db" \
+            --include "hoopoo.files.tar.zst" --include "hoopoo.files" \
+            --exclude "*.old" --exclude "*.gz" \
+            --copy-links --s3-no-check-bucket
+          
+          echo ""
+          echo "✓ All packages resigned and uploaded to pkgs.hoopoo.net/$CHANNEL/x86_64/"
+
+      - name: Verify upload
+        run: |
+          CHANNEL="${{ github.event.inputs.channel }}"
+          echo "Verifying pkgs.hoopoo.net/$CHANNEL/x86_64/hoopoo.db exists..."
+          sleep 5
+          curl -fsSL --retry 3 "https://pkgs.hoopoo.net/$CHANNEL/x86_64/hoopoo.db" > /dev/null && \
+            echo "✓ Database is live" || \
+            echo "⚠ Database not yet available (may take a moment to propagate)"
